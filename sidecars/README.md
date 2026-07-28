@@ -143,3 +143,5 @@ The manually dispatched `Build verified sidecars` workflow uses:
 
 Each native job fetches, builds, records provenance, verifies, probes, stages, and uploads a
 short-lived private workflow artifact. It does not create a GitHub release or publish sidecars.
+If FFmpeg configuration fails, xtask includes a bounded 64 KiB tail of `ffbuild/config.log` in the
+typed failure so the underlying compiler or linker probe is visible in the job log.

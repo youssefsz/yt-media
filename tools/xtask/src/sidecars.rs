@@ -5,7 +5,7 @@ use std::{
     env,
     ffi::OsString,
     fs::{self, File},
-    io::{self, Read, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::Arc,
     thread,
@@ -42,6 +42,7 @@ const SOURCE_MARKER: &str = ".verified-source";
 const BUILD_RECEIPT: &str = "ffmpeg-build-receipt.v1.json";
 const BUILD_OUTPUT_LIMIT_BYTES: usize = 32 * 1024 * 1024;
 const BUILD_OUTPUT_LIMIT_LINES: usize = 200_000;
+const CONFIGURE_LOG_TAIL_BYTES: usize = 64 * 1024;
 const MAX_DOWNLOAD_ATTEMPTS: u8 = 3;
 const X264_WINDOWS_ARM64_PATCH_KEY: &str = "x264_source_patch";
 const X264_WINDOWS_ARM64_PATCH_ID: &str = "windows-arm64-sse-arch-guard-v1";
@@ -1150,7 +1151,7 @@ fn build_ffmpeg(
     let mut configure_arguments = vec![OsString::from("./configure")];
     configure_arguments.extend(configuration.iter().cloned().map(OsString::from));
     let pkg_config_path = build_tool_path(&prefix.join("lib").join("pkgconfig"))?;
-    run_native_command(
+    let configure_result = run_native_command(
         source,
         "bash",
         configure_arguments,
@@ -1160,7 +1161,19 @@ fn build_ffmpeg(
             ("SOURCE_DATE_EPOCH", source_date_epoch),
             ("ZERO_AR_DATE", "1"),
         ],
-    )?;
+    );
+    if let Err(source_error) = configure_result {
+        let log_path = source.join("ffbuild").join("config.log");
+        let log = read_file_tail(&log_path, CONFIGURE_LOG_TAIL_BYTES);
+        return match log {
+            Ok(log) => Err(SidecarError::FfmpegConfigure {
+                log_path,
+                log: String::from_utf8_lossy(&log).into_owned(),
+                source: Box::new(source_error),
+            }),
+            Err(_) => Err(source_error),
+        };
+    }
     run_native_command(
         source,
         "make",
@@ -1242,6 +1255,18 @@ fn msys_path(value: &str) -> Option<String> {
         "/{drive}/{}",
         portable[2..].trim_start_matches('/')
     ))
+}
+
+fn read_file_tail(path: &Path, maximum_bytes: usize) -> io::Result<Vec<u8>> {
+    let mut file = File::open(path)?;
+    let length = file.metadata()?.len();
+    let maximum = u64::try_from(maximum_bytes).map_or(u64::MAX, |value| value);
+    let start = length.saturating_sub(maximum);
+    file.seek(SeekFrom::Start(start))?;
+    let capacity = usize::try_from(length - start).map_or(maximum_bytes, |value| value);
+    let mut bytes = Vec::with_capacity(capacity);
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 fn run_native_command<I>(
@@ -1488,6 +1513,20 @@ pub enum SidecarError {
         /// Observed number of exact precondition matches.
         found_matches: usize,
     },
+    /// `FFmpeg`'s configure probe failed and produced a bounded diagnostic log.
+    #[error(
+        "FFmpeg configure failed; tail of `{}` follows:\n{log}",
+        log_path.display()
+    )]
+    FfmpegConfigure {
+        /// Configure log path.
+        log_path: PathBuf,
+        /// Bounded tail of `FFmpeg`'s configure log.
+        log: String,
+        /// Original typed process failure.
+        #[source]
+        source: Box<SidecarError>,
+    },
     /// Network operation failed.
     #[error("sidecar network operation failed")]
     Network(#[from] reqwest::Error),
@@ -1682,7 +1721,7 @@ mod tests {
 
     use super::{
         SidecarError, X264_SSE_GUARD, X264_WINDOWS_ARM64_SSE_GUARD, apply_x264_windows_arm64_patch,
-        is_retryable_download_status, msys_path, reject_ejs_warnings, verify_file,
+        is_retryable_download_status, msys_path, read_file_tail, reject_ejs_warnings, verify_file,
         x264_build_configuration,
     };
 
@@ -1761,6 +1800,23 @@ mod tests {
         for status in [StatusCode::BAD_REQUEST, StatusCode::NOT_FOUND] {
             assert!(!is_retryable_download_status(status));
         }
+    }
+
+    #[test]
+    fn reads_only_the_bounded_tail_of_a_diagnostic_log() {
+        let directory = tempdir();
+        assert!(directory.is_ok());
+        let Some(directory) = directory.ok() else {
+            return;
+        };
+        let path = directory.path().join("config.log");
+        assert!(fs::write(&path, b"0123456789").is_ok());
+
+        assert_eq!(read_file_tail(&path, 4).ok().as_deref(), Some(&b"6789"[..]));
+        assert_eq!(
+            read_file_tail(&path, 32).ok().as_deref(),
+            Some(&b"0123456789"[..])
+        );
     }
 
     #[test]

@@ -6,6 +6,25 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+async-trait.workspace = true
+command-group.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+
+[dev-dependencies]
+tempfile = "3.24.0"
+
+[features]
+test-fixture = []
+
+[[bin]]
+name = "yt-media-process-fixture"
+path = "tests/fixtures/process_fixture.rs"
+required-features = ["test-fixture"]
 
 [lints]
 workspace = true

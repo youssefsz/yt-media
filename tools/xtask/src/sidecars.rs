@@ -43,6 +43,11 @@ const BUILD_RECEIPT: &str = "ffmpeg-build-receipt.v1.json";
 const BUILD_OUTPUT_LIMIT_BYTES: usize = 32 * 1024 * 1024;
 const BUILD_OUTPUT_LIMIT_LINES: usize = 200_000;
 const MAX_DOWNLOAD_ATTEMPTS: u8 = 3;
+const X264_WINDOWS_ARM64_PATCH_KEY: &str = "x264_source_patch";
+const X264_WINDOWS_ARM64_PATCH_ID: &str = "windows-arm64-sse-arch-guard-v1";
+const X264_SSE_GUARD: &str = "#if HAVE_VECTOREXT && defined(__SSE__)";
+const X264_WINDOWS_ARM64_SSE_GUARD: &str =
+    "#if (ARCH_X86 || ARCH_X86_64) && HAVE_VECTOREXT && defined(__SSE__)";
 
 /// Runs the `xtask` command-line interface.
 ///
@@ -529,6 +534,7 @@ impl SidecarContext {
 
         let x264_source =
             self.prepare_build_source(&x264.source, &build_root.join("x264-source"))?;
+        apply_x264_target_patch(target, &x264_source, ffmpeg_manifest)?;
         let lame_source =
             self.prepare_build_source(&lame.source, &build_root.join("lame-source"))?;
         let ffmpeg_source =
@@ -1020,15 +1026,11 @@ fn build_codec_dependencies(
 ) -> Result<(), SidecarError> {
     let prefix = build_tool_path(prefix)?;
     let x264_configuration = x264_build_configuration(target, &prefix);
-    let x264_cflags = x264_compiler_flags(target, cflags);
     run_native_command(
         x264_source,
         "bash",
         x264_configuration,
-        &[
-            ("CFLAGS", &x264_cflags),
-            ("SOURCE_DATE_EPOCH", source_date_epoch),
-        ],
+        &[("CFLAGS", cflags), ("SOURCE_DATE_EPOCH", source_date_epoch)],
     )?;
     run_native_command(
         x264_source,
@@ -1085,14 +1087,55 @@ fn x264_build_configuration(target: SupportedTarget, prefix: &str) -> Vec<OsStri
     configuration
 }
 
-fn x264_compiler_flags(target: SupportedTarget, common_flags: &str) -> String {
-    if target == SupportedTarget::WindowsArm64 {
-        // CLANGARM64 exposes __SSE__ for compatibility even though x264's x86-only v4si type is
-        // unavailable on AArch64. Keep the workaround isolated to x264's portable ARM64 build.
-        format!("{common_flags} -U__SSE__")
-    } else {
-        common_flags.to_owned()
+fn apply_x264_target_patch(
+    target: SupportedTarget,
+    source_root: &Path,
+    ffmpeg_manifest: &ToolManifest,
+) -> Result<(), SidecarError> {
+    if target != SupportedTarget::WindowsArm64 {
+        return Ok(());
     }
+
+    let recorded_patch = ffmpeg_manifest
+        .provenance
+        .metadata
+        .get(X264_WINDOWS_ARM64_PATCH_KEY)
+        .ok_or(SidecarError::BuildMetadataMissing {
+            field: X264_WINDOWS_ARM64_PATCH_KEY,
+        })?;
+    if recorded_patch != X264_WINDOWS_ARM64_PATCH_ID {
+        return Err(SidecarError::BuildMetadataMismatch {
+            field: X264_WINDOWS_ARM64_PATCH_KEY,
+            expected: X264_WINDOWS_ARM64_PATCH_ID,
+            found: recorded_patch.clone(),
+        });
+    }
+
+    apply_x264_windows_arm64_patch(source_root)
+}
+
+fn apply_x264_windows_arm64_patch(source_root: &Path) -> Result<(), SidecarError> {
+    let path = source_root.join("common").join("rectangle.h");
+    let source = fs::read_to_string(&path).map_err(|error| SidecarError::Io {
+        action: "read x264 Windows ARM64 patch target",
+        path: path.clone(),
+        source: error,
+    })?;
+    let matches = source.matches(X264_SSE_GUARD).count();
+    if matches != 1 {
+        return Err(SidecarError::SourcePatchMismatch {
+            patch: X264_WINDOWS_ARM64_PATCH_ID,
+            path,
+            expected_matches: 1,
+            found_matches: matches,
+        });
+    }
+    let patched = source.replacen(X264_SSE_GUARD, X264_WINDOWS_ARM64_SSE_GUARD, 1);
+    fs::write(&path, patched).map_err(|error| SidecarError::Io {
+        action: "write patched x264 Windows ARM64 source",
+        path,
+        source: error,
+    })
 }
 
 fn build_ffmpeg(
@@ -1420,6 +1463,31 @@ pub enum SidecarError {
         /// Missing metadata field.
         field: &'static str,
     },
+    /// Required reproducibility metadata did not match the implemented build behavior.
+    #[error("FFmpeg build metadata `{field}` is `{found}`; expected `{expected}`")]
+    BuildMetadataMismatch {
+        /// Mismatched metadata field.
+        field: &'static str,
+        /// Required value.
+        expected: &'static str,
+        /// Recorded value.
+        found: String,
+    },
+    /// A pinned source no longer matched a narrowly scoped deterministic patch.
+    #[error(
+        "source patch `{patch}` matched {found_matches} location(s) in `{}`; expected {expected_matches}",
+        path.display()
+    )]
+    SourcePatchMismatch {
+        /// Stable patch identifier recorded in provenance.
+        patch: &'static str,
+        /// Source file that should contain the patch precondition.
+        path: PathBuf,
+        /// Required number of exact precondition matches.
+        expected_matches: usize,
+        /// Observed number of exact precondition matches.
+        found_matches: usize,
+    },
     /// Network operation failed.
     #[error("sidecar network operation failed")]
     Network(#[from] reqwest::Error),
@@ -1613,8 +1681,9 @@ mod tests {
     use yt_media_engine::target::SupportedTarget;
 
     use super::{
-        SidecarError, is_retryable_download_status, msys_path, reject_ejs_warnings, verify_file,
-        x264_build_configuration, x264_compiler_flags,
+        SidecarError, X264_SSE_GUARD, X264_WINDOWS_ARM64_SSE_GUARD, apply_x264_windows_arm64_patch,
+        is_retryable_download_status, msys_path, reject_ejs_warnings, verify_file,
+        x264_build_configuration,
     };
 
     #[test]
@@ -1711,13 +1780,44 @@ mod tests {
     }
 
     #[test]
-    fn undefines_x86_sse_macro_only_for_windows_arm64_x264() {
-        let windows_arm = x264_compiler_flags(SupportedTarget::WindowsArm64, "-O2");
-        let windows_x64 = x264_compiler_flags(SupportedTarget::WindowsX64, "-O2");
-        let linux_arm = x264_compiler_flags(SupportedTarget::LinuxArm64, "-O2");
+    fn patches_the_x264_sse_guard_exactly() {
+        let directory = tempdir();
+        assert!(directory.is_ok());
+        let Some(directory) = directory.ok() else {
+            return;
+        };
+        let common = directory.path().join("common");
+        assert!(fs::create_dir(&common).is_ok());
+        let path = common.join("rectangle.h");
+        let source = format!("before\n{X264_SSE_GUARD}\nafter\n");
+        assert!(fs::write(&path, source).is_ok());
 
-        assert_eq!(windows_arm, "-O2 -U__SSE__");
-        assert_eq!(windows_x64, "-O2");
-        assert_eq!(linux_arm, "-O2");
+        assert!(apply_x264_windows_arm64_patch(directory.path()).is_ok());
+        let patched = fs::read_to_string(path);
+        assert!(patched.is_ok());
+        let expected = format!("before\n{X264_WINDOWS_ARM64_SSE_GUARD}\nafter\n");
+        assert_eq!(patched.ok().as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn fails_closed_when_the_x264_patch_precondition_changes() {
+        let directory = tempdir();
+        assert!(directory.is_ok());
+        let Some(directory) = directory.ok() else {
+            return;
+        };
+        let common = directory.path().join("common");
+        assert!(fs::create_dir(&common).is_ok());
+        assert!(fs::write(common.join("rectangle.h"), "changed upstream").is_ok());
+
+        let result = apply_x264_windows_arm64_patch(directory.path());
+        assert!(matches!(
+            result,
+            Err(SidecarError::SourcePatchMismatch {
+                expected_matches: 1,
+                found_matches: 0,
+                ..
+            })
+        ));
     }
 }

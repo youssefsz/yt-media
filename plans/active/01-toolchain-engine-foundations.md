@@ -130,9 +130,11 @@ analysis or downloads.
 - Build x264 without assembly only on Windows ARM64. CLANGARM64's COFF assembler cannot satisfy
   x264's GNU AArch64 assembly probe, while the portable C implementation still supplies the
   required libx264 H.264 encoder and remains subject to the same capability probe.
-- Undefine Clang's x86-compatibility `__SSE__` macro only while compiling x264's portable
-  Windows ARM64 implementation. Upstream x264 otherwise selects an x86-only vector branch whose
-  `v4si` type is unavailable on AArch64; all other targets retain their upstream compiler macros.
+- Apply a deterministic, fail-closed source patch only to the Windows ARM64 x264 build so its SSE
+  vector branch also requires an x86 architecture. CLANGARM64's platform headers reintroduce the
+  x86-compatibility `__SSE__` macro after command-line flags are processed, causing unpatched x264
+  to select a branch whose `v4si` type is unavailable on AArch64. Record the patch identifier in
+  the target's manifest provenance; all other targets use the byte-exact verified source.
 - Retry only transient artifact-download failures (`408`, `429`, transport timeouts/connect
   failures, and `5xx`) with a bounded three-attempt budget. Digest and exact-size checks remain
   mandatory after every successful response.

@@ -183,6 +183,9 @@ reviewable exception.
 
 ## Git Standards
 
+- When creating a branch, use a work-type prefix followed by a short, descriptive kebab-case name.
+  Use `feat/<name>` for features and `fix/<name>` for bug fixes. Use an appropriate equivalent for
+  other work, such as `docs/<name>`, `refactor/<name>`, `test/<name>`, or `chore/<name>`.
 - Use clear, imperative commit subjects.
 - Keep commits reviewable and leave the repository passing its quality gates.
 - Do not rewrite shared history, force-push, or publish releases without explicit authorization.

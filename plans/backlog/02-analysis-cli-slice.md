@@ -1,7 +1,7 @@
 ---
 id: '02'
 title: Analysis engine and CLI slice
-status: blocked
+status: ready
 depends_on:
   - '01'
 unlocks:

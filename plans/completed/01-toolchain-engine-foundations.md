@@ -1,16 +1,20 @@
 ---
 id: '01'
 title: Toolchain and engine foundations
-status: in-progress
+status: completed
 depends_on: []
 unlocks:
   - '02'
 started_at: '2026-07-28T15:49:13Z'
-completed_at: null
+completed_at: '2026-07-28T19:32:06Z'
 implementation_commits:
   - b54e7db
   - aaca747
   - 12c704e
+  - 8d076c1
+  - 5c08e7c
+  - 8672f2f
+  - fc09863
 ---
 
 # Plan 01: Toolchain and Engine Foundations
@@ -143,39 +147,55 @@ analysis or downloads.
 
 ## Completion Evidence
 
-- Completed at: not completed; blocked on native artifact verification.
+- Completed at: `2026-07-28T19:32:06Z`.
 - Implementation commits:
   - `b54e7db` — safe asynchronous process boundary, target/tool contracts, manifest and receipt
     validation, verified resolution, and process-tree tests.
   - `aaca747` — six-target inventory, secure archive handling, `xtask` sidecar automation, and the
     manually dispatched native workflow.
   - `12c704e` — architecture decision, contributor guidance, and sidecar inventory/runbook.
-- Sidecar workflow run/artifacts: not run and no artifacts published. The new workflow exists only
-  in local commits; running it on the six GitHub-hosted operating-system/architecture runners
-  requires those commits to be pushed, which this task explicitly forbids.
-- Verification commands and results:
+  - `8d076c1` — portable native-source extraction, retry policy, and Unix/macOS portability fixes.
+  - `5c08e7c` — the target-scoped Windows ARM64 x264 portable-C configuration.
+  - `8672f2f` — bounded typed FFmpeg configure diagnostics.
+  - `fc09863` — explicit, verified Windows ARM64 LLVM tool selection with the obsolete source
+    mutation removed.
+- Root and contract verification on commit `fc09863`:
   - `pnpm format:check`, `pnpm lint`, `pnpm check`, `pnpm test`, and `pnpm build` passed on
     2026-07-28.
   - `cargo test --workspace --all-features` passed 17 engine unit tests, 10 process integration
-    tests, 10 `xtask` archive/checksum/EJS tests, and the committed-manifest contract test.
-  - `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-.github/workflows/sidecars.yml` passed.
-  - `cargo xtask sidecars fetch --target <triple>` completed for all six target triples, including
-    download and post-extraction digest verification.
-  - The cached Windows x64 yt-dlp and Deno assets reported exact versions `2026.06.09` and `2.8.1`;
-    Deno executed the restricted JavaScript probe and yt-dlp accepted the exact paired runtime path.
+    tests covering cancellation and complete process-tree cleanup, 16 `xtask` archive, checksum,
+    retry, diagnostic, and toolchain tests, and the committed-manifest contract test.
+  - `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/ci.yml .github/workflows/sidecars.yml`
+    passed.
   - `git ls-files` found no external executable, sidecar cache, or staged binary.
-  - `cargo xtask sidecars build --target x86_64-pc-windows-msvc` cannot run on this machine's
-    audited native build path: `native build program 'bash' is not available on PATH`. The machine
-    has no MSYS2 installation, `nasm`, or `pkg-config`; its `C:\Windows\System32\bash.exe` is a WSL
-    launcher that does not provide the required environment.
-  - `cargo xtask sidecars verify --target x86_64-pc-windows-msvc` correctly fails closed because
-    `ffmpeg-build-receipt.v1.json` does not exist. The ambient `8.0.1-full_build-www.gyan.dev`
-    FFmpeg/FFprobe installation was inspected but never copied, recorded, verified, or substituted.
+- Hosted verification:
+  - [CI run `30390702709`](https://github.com/youssefsz/yt-media/actions/runs/30390702709)
+    passed the Linux quality gates plus native Rust checks on Windows and macOS for `fc09863`.
+  - [Sidecar run `30390715706`](https://github.com/youssefsz/yt-media/actions/runs/30390715706)
+    completed successfully for all six release targets. Every job fetched pinned inputs, built
+    FFmpeg/FFprobe natively, recorded and verified output digests, verified exact tool identities,
+    probed libx264 H.264, native AAC, libmp3lame MP3, MP4 muxing, FFprobe, Deno, and the yt-dlp/Deno
+    pairing, staged Tauri-named executables, and uploaded a private 14-day workflow artifact.
+  - The Windows ARM64 build log recorded
+    `native compiler target: aarch64-w64-windows-gnu` before compiling dependencies.
+  - Private artifact records:
+    - `sidecars-x86_64-pc-windows-msvc`: ID `8701313047`, 88,440,198 bytes,
+      `sha256:1c2899c9801f9cc763d4f576a42541ab5f43678eef02979adb3d752bed9147d3`.
+    - `sidecars-aarch64-pc-windows-msvc`: ID `8701370272`, 85,335,540 bytes,
+      `sha256:42e39460f902cd54acfcc8ed046b027d2b4716dc25391f3c029515c2b4e79001`.
+    - `sidecars-x86_64-apple-darwin`: ID `8701215822`, 103,580,717 bytes,
+      `sha256:c598f227912eedf679167666efd0c3aff490f82c1e45beec98bd20830e804fe3`.
+    - `sidecars-aarch64-apple-darwin`: ID `8700969998`, 99,177,503 bytes,
+      `sha256:36efed60686c90a9623a4f75f7981193ee8854ea87bc8f55fbcc0d0fb5a8bdfd`.
+    - `sidecars-x86_64-unknown-linux-gnu`: ID `8701020658`, 113,952,185 bytes,
+      `sha256:1434b563626e38df070c4e8d09594027ec4a04c9ef9aa83e2928281b866ec2a9`.
+    - `sidecars-aarch64-unknown-linux-gnu`: ID `8701005283`, 111,238,064 bytes,
+      `sha256:4d205c6aca6d36e181f825be6d1959ab8759d15c9d99f9484f54c86f7a298fa2`.
+  - No GitHub release, version tag, or public sidecar artifact was created.
 
 ## Resumption Evidence
 
 The former publication and native-runner blocker was removed on 2026-07-28 when the user
 authorized publishing the repository and running its private workflow artifacts. Plan 01 resumed
-to address failures found by the six-target validation run; it remains active until every target
-passes.
+to address failures found by the six-target validation run. Those failures were resolved and every
+target passed in sidecar run `30390715706`.

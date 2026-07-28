@@ -130,11 +130,12 @@ analysis or downloads.
 - Build x264 without assembly only on Windows ARM64. CLANGARM64's COFF assembler cannot satisfy
   x264's GNU AArch64 assembly probe, while the portable C implementation still supplies the
   required libx264 H.264 encoder and remains subject to the same capability probe.
-- Apply a deterministic, fail-closed source patch only to the Windows ARM64 x264 build so its SSE
-  vector branch also requires an x86 architecture. CLANGARM64's platform headers reintroduce the
-  x86-compatibility `__SSE__` macro after command-line flags are processed, causing unpatched x264
-  to select a branch whose `v4si` type is unavailable on AArch64. Record the patch identifier in
-  the target's manifest provenance; all other targets use the byte-exact verified source.
+- Select the CLANGARM64 LLVM tools explicitly for Windows ARM64 native builds and verify that
+  `clang -dumpmachine` reports an AArch64 target before compiling any dependency. The inherited
+  GitHub runner `PATH` also exposes an x86_64 MinGW `gcc`; allowing Autoconf to choose plain `gcc`
+  compiled x86 objects inside the ARM64 job and caused misleading x264 and LAME failures. Keep the
+  verified x264 source byte-exact, retain its Windows ARM64 `--disable-asm` configuration, and
+  leave every other target's native tool selection unchanged.
 - Retry only transient artifact-download failures (`408`, `429`, transport timeouts/connect
   failures, and `5xx`) with a bounded three-attempt budget. Digest and exact-size checks remain
   mandatory after every successful response.

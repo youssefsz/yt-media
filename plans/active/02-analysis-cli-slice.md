@@ -1,12 +1,12 @@
 ---
 id: '02'
 title: Analysis engine and CLI slice
-status: ready
+status: in-progress
 depends_on:
   - '01'
 unlocks:
   - '03'
-started_at: null
+started_at: '2026-07-28T19:46:44Z'
 completed_at: null
 implementation_commits: []
 ---

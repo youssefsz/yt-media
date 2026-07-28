@@ -110,7 +110,18 @@ analysis or downloads.
 
 ## Decisions and Deviations
 
-Record any accepted deviation here before code depends on it.
+- Pin x264 to stable commit `b35605ace3ddf7c1a5d67a2eb553f034aef41d55` and LAME to
+  release `3.100`. Their source archive sizes and SHA-256 digests are part of every target's
+  FFmpeg provenance record.
+- Record target-native FFmpeg and FFprobe executable sizes and SHA-256 digests in the mandatory
+  per-target build receipt. The baseline manifest pins their source archive, output paths, and
+  receipt contract; it cannot truthfully predeclare bytes that do not exist until each native
+  runner builds them.
+- Keep the routine EJS pairing probe deterministic and network-free: verify the exact Deno
+  identity, execute restricted JavaScript, and require yt-dlp to accept that executable as its sole
+  configured runtime. The explicit `--ejs-url` smoke exercises live EJS extraction separately and
+  rejects yt-dlp's standard missing-runtime and challenge-solving warnings.
+- No fixed Plan 01 requirement has been weakened or substituted.
 
 ## Completion Evidence
 

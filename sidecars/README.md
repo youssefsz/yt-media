@@ -60,6 +60,10 @@ host-path and archive-time variance. Required output capabilities are libx264 H.
 libmp3lame MP3, and the MP4 muxer. Device capture and network protocols are excluded; the product
 hands FFmpeg explicit local files.
 
+Windows ARM64 configures x264 with `--disable-asm` because CLANGARM64's COFF assembler cannot pass
+x264's GNU AArch64 assembly probe. The portable C implementation remains enabled and the workflow
+still requires FFmpeg to expose the `libx264` encoder before it can stage an artifact.
+
 Expected native output names are `ffmpeg.exe` and `ffprobe.exe` on Windows, and `ffmpeg` and
 `ffprobe` elsewhere. A successful build records them as `bin/<name>` in
 `ffmpeg-build-receipt.v1.json`.
@@ -94,9 +98,11 @@ cargo xtask sidecars probe --target x86_64-pc-windows-msvc
 cargo xtask sidecars stage --target x86_64-pc-windows-msvc
 ```
 
-`fetch` is idempotent. It checks download size and SHA-256 before extraction. Extraction rejects
-absolute paths, traversal, platform prefixes, duplicate destinations, links, and special files.
-Release executable hashes are checked again after extraction.
+`fetch` is idempotent. It retries only transient network and HTTP failures with a bounded budget,
+then checks download size and SHA-256 before extraction. Extraction rejects absolute paths,
+traversal, platform prefixes, duplicate destinations, links, and special files. Verified tar
+sources preserve ordinary Unix permission bits but strip set-id and sticky bits. Release executable
+hashes are checked again after extraction.
 
 `verify` rehashes all four cached executables, validates the native receipt, and runs bounded exact
 version probes. `probe` additionally checks H.264/AAC/MP3 encoders, MP4 muxing, FFprobe startup,

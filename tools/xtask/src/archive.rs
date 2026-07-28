@@ -107,6 +107,16 @@ fn extract_zip(archive_path: &Path, destination: &Path) -> Result<(), ArchiveErr
     Ok(())
 }
 
+#[cfg(unix)]
+fn set_unix_mode(path: &Path, archive_mode: u32) -> Result<(), ArchiveError> {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Preserve only ordinary permission bits. Verified source archives never gain set-id or
+    // sticky semantics merely because their metadata requested them.
+    let permissions = fs::Permissions::from_mode(archive_mode & 0o777);
+    fs::set_permissions(path, permissions).map_err(ArchiveError::Io)
+}
+
 fn reject_zip_link(entry: &zip::read::ZipFile<'_, File>) -> Result<(), ArchiveError> {
     if let Some(mode) = entry.unix_mode() {
         let file_type = mode & 0o170_000;
@@ -160,9 +170,14 @@ fn extract_tar<R: Read>(reader: R, destination: &Path) -> Result<(), ArchiveErro
                 fs::create_dir_all(output).map_err(ArchiveError::Io)?;
             }
             DestinationKind::File => {
+                #[cfg(unix)]
+                let mode = entry.header().mode().map_err(ArchiveError::Io)?;
                 create_parent(&output)?;
-                let mut file = File::create(output).map_err(ArchiveError::Io)?;
+                let mut file = File::create(&output).map_err(ArchiveError::Io)?;
                 io::copy(&mut entry, &mut file).map_err(ArchiveError::Io)?;
+                drop(file);
+                #[cfg(unix)]
+                set_unix_mode(&output, mode)?;
             }
         }
     }
@@ -492,6 +507,50 @@ mod tests {
             None,
         );
         assert!(matches!(result, Err(ArchiveError::Link { .. })));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preserves_safe_tar_executable_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempdir();
+        assert!(directory.is_ok());
+        let Some(directory) = directory.ok() else {
+            return;
+        };
+        let archive = directory.path().join("executable.tar.gz");
+        let file = File::create(&archive);
+        assert!(file.is_ok());
+        let Some(file) = file.ok() else {
+            return;
+        };
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        let bytes = b"#!/bin/sh\n";
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Regular);
+        header.set_size(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
+        header.set_mode(0o4755);
+        header.set_cksum();
+        assert!(
+            builder
+                .append_data(&mut header, "configure", &bytes[..])
+                .is_ok()
+        );
+        assert!(
+            builder
+                .into_inner()
+                .and_then(flate2::write::GzEncoder::finish)
+                .is_ok()
+        );
+        let destination = directory.path().join("output");
+        assert!(extract_archive(&archive, ArchiveFormat::TarGz, &destination, None).is_ok());
+        let metadata = fs::metadata(destination.join("configure"));
+        assert!(metadata.is_ok());
+        if let Ok(metadata) = metadata {
+            assert_eq!(metadata.permissions().mode() & 0o7777, 0o755);
+        }
     }
 
     fn write_zip(

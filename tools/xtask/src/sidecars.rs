@@ -8,11 +8,15 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::Arc,
+    thread,
     time::Duration,
 };
 
 use clap::{Args, Parser, Subcommand};
-use reqwest::blocking::Client;
+use reqwest::{
+    StatusCode,
+    blocking::{Client, Response},
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tempfile::{Builder as TempBuilder, NamedTempFile};
@@ -38,6 +42,7 @@ const SOURCE_MARKER: &str = ".verified-source";
 const BUILD_RECEIPT: &str = "ffmpeg-build-receipt.v1.json";
 const BUILD_OUTPUT_LIMIT_BYTES: usize = 32 * 1024 * 1024;
 const BUILD_OUTPUT_LIMIT_LINES: usize = 200_000;
+const MAX_DOWNLOAD_ATTEMPTS: u8 = 3;
 
 /// Runs the `xtask` command-line interface.
 ///
@@ -245,7 +250,7 @@ impl SidecarContext {
             return Ok(destination);
         }
 
-        let response = self.client.get(&source.url).send()?.error_for_status()?;
+        let response = self.download(source)?;
         if response
             .content_length()
             .is_some_and(|length| length != source.size)
@@ -289,6 +294,34 @@ impl SidecarContext {
         verify_file(temporary.path(), source.size, &source.sha256)?;
         replace_named_temp(temporary, &destination)?;
         Ok(destination)
+    }
+
+    fn download(&self, source: &SourceArtifact) -> Result<Response, SidecarError> {
+        for attempt in 1..=MAX_DOWNLOAD_ATTEMPTS {
+            let result = self
+                .client
+                .get(&source.url)
+                .send()
+                .and_then(Response::error_for_status);
+            match result {
+                Ok(response) => return Ok(response),
+                Err(error)
+                    if attempt < MAX_DOWNLOAD_ATTEMPTS && is_retryable_download_error(&error) =>
+                {
+                    thread::sleep(Duration::from_secs(u64::from(attempt)));
+                }
+                Err(source_error) => {
+                    return Err(SidecarError::DownloadNetwork {
+                        url: source.url.clone(),
+                        attempts: attempt,
+                        source: source_error,
+                    });
+                }
+            }
+        }
+        Err(SidecarError::DownloadAttemptsExhausted {
+            url: source.url.clone(),
+        })
     }
 
     fn ensure_source_tree(
@@ -517,6 +550,7 @@ impl SidecarContext {
             })?;
         let install = build_root.join("ffmpeg-install");
         build_codec_dependencies(
+            target,
             &x264_source,
             &lame_source,
             &prefix,
@@ -963,7 +997,20 @@ fn reject_ejs_warnings(output: &str) -> Result<(), SidecarError> {
     Ok(())
 }
 
+fn is_retryable_download_error(error: &reqwest::Error) -> bool {
+    error.is_connect()
+        || error.is_timeout()
+        || error.status().is_some_and(is_retryable_download_status)
+}
+
+fn is_retryable_download_status(status: StatusCode) -> bool {
+    status == StatusCode::REQUEST_TIMEOUT
+        || status == StatusCode::TOO_MANY_REQUESTS
+        || status.is_server_error()
+}
+
 fn build_codec_dependencies(
+    target: SupportedTarget,
     x264_source: &Path,
     lame_source: &Path,
     prefix: &Path,
@@ -972,16 +1019,11 @@ fn build_codec_dependencies(
     source_date_epoch: &str,
 ) -> Result<(), SidecarError> {
     let prefix = build_tool_path(prefix)?;
+    let x264_configuration = x264_build_configuration(target, &prefix);
     run_native_command(
         x264_source,
         "bash",
-        [
-            OsString::from("./configure"),
-            OsString::from(format!("--prefix={prefix}")),
-            OsString::from("--enable-static"),
-            OsString::from("--disable-cli"),
-            OsString::from("--disable-opencl"),
-        ],
+        x264_configuration,
         &[("CFLAGS", cflags), ("SOURCE_DATE_EPOCH", source_date_epoch)],
     )?;
     run_native_command(
@@ -1021,6 +1063,22 @@ fn build_codec_dependencies(
         [OsString::from("install")],
         &[("SOURCE_DATE_EPOCH", source_date_epoch)],
     )
+}
+
+fn x264_build_configuration(target: SupportedTarget, prefix: &str) -> Vec<OsString> {
+    let mut configuration = vec![
+        OsString::from("./configure"),
+        OsString::from(format!("--prefix={prefix}")),
+        OsString::from("--enable-static"),
+        OsString::from("--disable-cli"),
+        OsString::from("--disable-opencl"),
+    ];
+    if target == SupportedTarget::WindowsArm64 {
+        // x264's GNU-style AArch64 assembly probe does not support CLANGARM64's COFF assembler.
+        // The portable C implementation still provides the required H.264 encoder.
+        configuration.push(OsString::from("--disable-asm"));
+    }
+    configuration
 }
 
 fn build_ffmpeg(
@@ -1351,6 +1409,23 @@ pub enum SidecarError {
     /// Network operation failed.
     #[error("sidecar network operation failed")]
     Network(#[from] reqwest::Error),
+    /// An artifact download failed after bounded retry handling.
+    #[error("download `{url}` failed after {attempts} attempt(s)")]
+    DownloadNetwork {
+        /// Artifact URL.
+        url: String,
+        /// Number of attempts performed.
+        attempts: u8,
+        /// Final HTTP failure.
+        #[source]
+        source: reqwest::Error,
+    },
+    /// The bounded download loop ended without a response or final error.
+    #[error("download `{url}` exhausted its retry budget")]
+    DownloadAttemptsExhausted {
+        /// Artifact URL.
+        url: String,
+    },
     /// Downloaded size differed from the manifest.
     #[error("download `{url}` produced {found} bytes; expected {expected}")]
     DownloadSize {
@@ -1518,10 +1593,15 @@ impl From<ProcessError> for SidecarError {
 mod tests {
     use std::{fs, io::Write};
 
+    use reqwest::StatusCode;
     use sha2::{Digest, Sha256};
     use tempfile::tempdir;
+    use yt_media_engine::target::SupportedTarget;
 
-    use super::{SidecarError, msys_path, reject_ejs_warnings, verify_file};
+    use super::{
+        SidecarError, is_retryable_download_status, msys_path, reject_ejs_warnings, verify_file,
+        x264_build_configuration,
+    };
 
     #[test]
     fn rejects_checksum_mismatch() {
@@ -1584,5 +1664,35 @@ mod tests {
             Some("<external-native-build>".to_owned())
         );
         assert_eq!(msys_path(r"\\server\share"), None);
+    }
+
+    #[test]
+    fn retries_only_transient_http_statuses() {
+        for status in [
+            StatusCode::REQUEST_TIMEOUT,
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::BAD_GATEWAY,
+        ] {
+            assert!(is_retryable_download_status(status));
+        }
+        for status in [StatusCode::BAD_REQUEST, StatusCode::NOT_FOUND] {
+            assert!(!is_retryable_download_status(status));
+        }
+    }
+
+    #[test]
+    fn disables_x264_assembly_only_for_windows_arm64() {
+        let windows_arm = x264_build_configuration(SupportedTarget::WindowsArm64, "/prefix");
+        let windows_x64 = x264_build_configuration(SupportedTarget::WindowsX64, "/prefix");
+        assert!(
+            windows_arm
+                .iter()
+                .any(|argument| argument == "--disable-asm")
+        );
+        assert!(
+            !windows_x64
+                .iter()
+                .any(|argument| argument == "--disable-asm")
+        );
     }
 }

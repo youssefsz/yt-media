@@ -7,8 +7,13 @@ dist/
 # Rust
 target/
 
+# Verified sidecar downloads, native builds, and release staging
+.sidecar-cache/
+sidecar-staging/
+
 # Tauri-generated schemas and platform projects
 apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/binaries/
 
 # Local configuration and secrets
 .env

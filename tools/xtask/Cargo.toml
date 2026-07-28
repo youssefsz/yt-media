@@ -1,0 +1,30 @@
+[package]
+name = "xtask"
+description = "Repository maintenance and verified sidecar automation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+clap.workspace = true
+flate2 = "1.1.9"
+reqwest = { version = "0.13.4", default-features = false, features = [
+  "blocking",
+  "rustls",
+] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tar = "0.4.46"
+tempfile = "3.24.0"
+thiserror.workspace = true
+tokio.workspace = true
+yt-media-engine = { path = "../../crates/engine" }
+xz2 = "0.1.7"
+zip = { version = "8.1.0", default-features = false, features = [
+  "deflate-flate2-zlib-rs",
+] }
+
+[lints]
+workspace = true

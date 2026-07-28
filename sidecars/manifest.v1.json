@@ -1,0 +1,821 @@
+{
+  "schema_version": 1,
+  "targets": [
+    {
+      "target": "x86_64-pc-windows-msvc",
+      "tools": [
+        {
+          "tool": "yt-dlp",
+          "version": "2026.06.09",
+          "source": {
+            "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp.exe",
+            "source_ref": "2026.06.09",
+            "filename": "yt-dlp.exe",
+            "archive_format": "raw",
+            "sha256": "3a48cb955d55c8821b60ccbdbbc6f61bc958f2f3d3b7ad5eaf3d83a543293a27",
+            "size": 18202192
+          },
+          "executables": [
+            {
+              "archive_path": "yt-dlp.exe",
+              "sha256": "3a48cb955d55c8821b60ccbdbbc6f61bc958f2f3d3b7ad5eaf3d83a543293a27",
+              "size": 18202192
+            }
+          ],
+          "distribution": { "kind": "upstream-release" },
+          "provenance": {
+            "repository": "https://github.com/yt-dlp/yt-dlp",
+            "license": "GPL-3.0-or-later for the standalone executable; see upstream THIRD_PARTY_LICENSES.txt",
+            "build_definition": null,
+            "build_inputs": [],
+            "metadata": { "release_asset": "yt-dlp.exe" }
+          }
+        },
+        {
+          "tool": "ffmpeg",
+          "version": "8.0.1",
+          "source": {
+            "url": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+            "source_ref": "n8.0.1@894da5ca7d742e4429ffb2af534fcda0103ef593",
+            "filename": "ffmpeg-8.0.1.tar.xz",
+            "archive_format": "tar-xz",
+            "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+            "size": 11388848
+          },
+          "executables": [{ "archive_path": "bin/ffmpeg.exe", "sha256": null, "size": null }],
+          "distribution": {
+            "kind": "native-build",
+            "receipt_file": "ffmpeg-build-receipt.v1.json"
+          },
+          "provenance": {
+            "repository": "https://github.com/FFmpeg/FFmpeg",
+            "license": "GPL build due to --enable-gpl and libx264; distribution requires separate license review",
+            "build_definition": ".github/workflows/sidecars.yml",
+            "build_inputs": [
+              {
+                "name": "x264",
+                "source": {
+                  "url": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+                  "source_ref": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+                  "filename": "x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+                  "archive_format": "tar-gz",
+                  "sha256": "cd71a7515b0e9a012e1ac9b1f8415bebcaf6fc97d4db32286642ac4c0fbe24f9",
+                  "size": 1040327
+                }
+              },
+              {
+                "name": "lame",
+                "source": {
+                  "url": "https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz",
+                  "source_ref": "3.100",
+                  "filename": "lame-3.100.tar.gz",
+                  "archive_format": "tar-gz",
+                  "sha256": "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e",
+                  "size": 1524133
+                }
+              }
+            ],
+            "metadata": {
+              "source_commit": "894da5ca7d742e4429ffb2af534fcda0103ef593",
+              "source_date_epoch": "1763603031"
+            }
+          }
+        },
+        {
+          "tool": "ffprobe",
+          "version": "8.0.1",
+          "source": {
+            "url": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+            "source_ref": "n8.0.1@894da5ca7d742e4429ffb2af534fcda0103ef593",
+            "filename": "ffmpeg-8.0.1.tar.xz",
+            "archive_format": "tar-xz",
+            "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+            "size": 11388848
+          },
+          "executables": [{ "archive_path": "bin/ffprobe.exe", "sha256": null, "size": null }],
+          "distribution": {
+            "kind": "native-build",
+            "receipt_file": "ffmpeg-build-receipt.v1.json"
+          },
+          "provenance": {
+            "repository": "https://github.com/FFmpeg/FFmpeg",
+            "license": "GPL build due to --enable-gpl and libx264; distribution requires separate license review",
+            "build_definition": ".github/workflows/sidecars.yml",
+            "build_inputs": [],
+            "metadata": {
+              "source_commit": "894da5ca7d742e4429ffb2af534fcda0103ef593",
+              "source_date_epoch": "1763603031"
+            }
+          }
+        },
+        {
+          "tool": "deno",
+          "version": "2.8.1",
+          "source": {
+            "url": "https://github.com/denoland/deno/releases/download/v2.8.1/deno-x86_64-pc-windows-msvc.zip",
+            "source_ref": "v2.8.1",
+            "filename": "deno-x86_64-pc-windows-msvc.zip",
+            "archive_format": "zip",
+            "sha256": "5fb5bac71f609fb91ec8960fb290885aadc27eeb22f07a8eca0c3db6be38b11a",
+            "size": 42032643
+          },
+          "executables": [
+            {
+              "archive_path": "deno.exe",
+              "sha256": "a8afddac131261dc9e085c6a1a79544f0567bd09e481034b5d1533588cba9b30",
+              "size": 101328320
+            }
+          ],
+          "distribution": { "kind": "upstream-release" },
+          "provenance": {
+            "repository": "https://github.com/denoland/deno",
+            "license": "MIT",
+            "build_definition": null,
+            "build_inputs": [],
+            "metadata": { "release_asset": "deno-x86_64-pc-windows-msvc.zip" }
+          }
+        }
+      ]
+    },
+    {
+      "target": "aarch64-pc-windows-msvc",
+      "tools": [
+        {
+          "tool": "yt-dlp",
+          "version": "2026.06.09",
+          "source": {
+            "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp_arm64.exe",
+            "source_ref": "2026.06.09",
+            "filename": "yt-dlp_arm64.exe",
+            "archive_format": "raw",
+            "sha256": "847583f91bb6d26479c1dc9643c2f4b8857a90b40d619da97b0cfabccb9138d0",
+            "size": 22204855
+          },
+          "executables": [
+            {
+              "archive_path": "yt-dlp_arm64.exe",
+              "sha256": "847583f91bb6d26479c1dc9643c2f4b8857a90b40d619da97b0cfabccb9138d0",
+              "size": 22204855
+            }
+          ],
+          "distribution": { "kind": "upstream-release" },
+          "provenance": {
+            "repository": "https://github.com/yt-dlp/yt-dlp",
+            "license": "GPL-3.0-or-later for the standalone executable; see upstream THIRD_PARTY_LICENSES.txt",
+            "build_definition": null,
+            "build_inputs": [],
+            "metadata": { "release_asset": "yt-dlp_arm64.exe" }
+          }
+        },
+        {
+          "tool": "ffmpeg",
+          "version": "8.0.1",
+          "source": {
+            "url": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+            "source_ref": "n8.0.1@894da5ca7d742e4429ffb2af534fcda0103ef593",
+            "filename": "ffmpeg-8.0.1.tar.xz",
+            "archive_format": "tar-xz",
+            "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+            "size": 11388848
+          },
+          "executables": [{ "archive_path": "bin/ffmpeg.exe", "sha256": null, "size": null }],
+          "distribution": {
+            "kind": "native-build",
+            "receipt_file": "ffmpeg-build-receipt.v1.json"
+          },
+          "provenance": {
+            "repository": "https://github.com/FFmpeg/FFmpeg",
+            "license": "GPL build due to --enable-gpl and libx264; distribution requires separate license review",
+            "build_definition": ".github/workflows/sidecars.yml",
+            "build_inputs": [
+              {
+                "name": "x264",
+                "source": {
+                  "url": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+                  "source_ref": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+                  "filename": "x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+                  "archive_format": "tar-gz",
+                  "sha256": "cd71a7515b0e9a012e1ac9b1f8415bebcaf6fc97d4db32286642ac4c0fbe24f9",
+                  "size": 1040327
+                }
+              },
+              {
+                "name": "lame",
+                "source": {
+                  "url": "https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz",
+                  "source_ref": "3.100",
+                  "filename": "lame-3.100.tar.gz",
+                  "archive_format": "tar-gz",
+                  "sha256": "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e",
+                  "size": 1524133
+                }
+              }
+            ],
+            "metadata": {
+              "source_commit": "894da5ca7d742e4429ffb2af534fcda0103ef593",
+              "source_date_epoch": "1763603031"
+            }
+          }
+        },
+        {
+          "tool": "ffprobe",
+          "version": "8.0.1",
+          "source": {
+            "url": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+            "source_ref": "n8.0.1@894da5ca7d742e4429ffb2af534fcda0103ef593",
+            "filename": "ffmpeg-8.0.1.tar.xz",
+            "archive_format": "tar-xz",
+            "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+            "size": 11388848
+          },
+          "executables": [{ "archive_path": "bin/ffprobe.exe", "sha256": null, "size": null }],
+          "distribution": {
+            "kind": "native-build",
+            "receipt_file": "ffmpeg-build-receipt.v1.json"
+          },
+          "provenance": {
+            "repository": "https://github.com/FFmpeg/FFmpeg",
+            "license": "GPL build due to --enable-gpl and libx264; distribution requires separate license review",
+            "build_definition": ".github/workflows/sidecars.yml",
+            "build_inputs": [],
+            "metadata": {
+              "source_commit": "894da5ca7d742e4429ffb2af534fcda0103ef593",
+              "source_date_epoch": "1763603031"
+            }
+          }
+        },
+        {
+          "tool": "deno",
+          "version": "2.8.1",
+          "source": {
+            "url": "https://github.com/denoland/deno/releases/download/v2.8.1/deno-aarch64-pc-windows-msvc.zip",
+            "source_ref": "v2.8.1",
+            "filename": "deno-aarch64-pc-windows-msvc.zip",
+            "archive_format": "zip",
+            "sha256": "b0e2ae0e695e9460b62cebf32d0ca4698e914fe2c224cfc034b68a89c793d1d4",
+            "size": 39979734
+          },
+          "executables": [
+            {
+              "archive_path": "deno.exe",
+              "sha256": "103d5f5b986be2f3dc9c2efb13ca1db8b688f6269e4db2f543ef6a0cd63f0158",
+              "size": 92650272
+            }
+          ],
+          "distribution": { "kind": "upstream-release" },
+          "provenance": {
+            "repository": "https://github.com/denoland/deno",
+            "license": "MIT",
+            "build_definition": null,
+            "build_inputs": [],
+            "metadata": { "release_asset": "deno-aarch64-pc-windows-msvc.zip" }
+          }
+        }
+      ]
+    },
+    {
+      "target": "x86_64-apple-darwin",
+      "tools": [
+        {
+          "tool": "yt-dlp",
+          "version": "2026.06.09",
+          "source": {
+            "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp_macos",
+            "source_ref": "2026.06.09",
+            "filename": "yt-dlp_macos",
+            "archive_format": "raw",
+            "sha256": "b82c3626952e6c14eaf654cc565866775ffd0b9ffb7021628ac59b42c2f4f244",
+            "size": 36478448
+          },
+          "executables": [
+            {
+              "archive_path": "yt-dlp_macos",
+              "sha256": "b82c3626952e6c14eaf654cc565866775ffd0b9ffb7021628ac59b42c2f4f244",
+              "size": 36478448
+            }
+          ],
+          "distribution": { "kind": "upstream-release" },
+          "provenance": {
+            "repository": "https://github.com/yt-dlp/yt-dlp",
+            "license": "GPL-3.0-or-later for the standalone executable; see upstream THIRD_PARTY_LICENSES.txt",
+            "build_definition": null,
+            "build_inputs": [],
+            "metadata": { "release_asset": "yt-dlp_macos universal binary" }
+          }
+        },
+        {
+          "tool": "ffmpeg",
+          "version": "8.0.1",
+          "source": {
+            "url": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+            "source_ref": "n8.0.1@894da5ca7d742e4429ffb2af534fcda0103ef593",
+            "filename": "ffmpeg-8.0.1.tar.xz",
+            "archive_format": "tar-xz",
+            "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+            "size": 11388848
+          },
+          "executables": [{ "archive_path": "bin/ffmpeg", "sha256": null, "size": null }],
+          "distribution": {
+            "kind": "native-build",
+            "receipt_file": "ffmpeg-build-receipt.v1.json"
+          },
+          "provenance": {
+            "repository": "https://github.com/FFmpeg/FFmpeg",
+            "license": "GPL build due to --enable-gpl and libx264; distribution requires separate license review",
+            "build_definition": ".github/workflows/sidecars.yml",
+            "build_inputs": [
+              {
+                "name": "x264",
+                "source": {
+                  "url": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+                  "source_ref": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+                  "filename": "x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+                  "archive_format": "tar-gz",
+                  "sha256": "cd71a7515b0e9a012e1ac9b1f8415bebcaf6fc97d4db32286642ac4c0fbe24f9",
+                  "size": 1040327
+                }
+              },
+              {
+                "name": "lame",
+                "source": {
+                  "url": "https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz",
+                  "source_ref": "3.100",
+                  "filename": "lame-3.100.tar.gz",
+                  "archive_format": "tar-gz",
+                  "sha256": "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e",
+                  "size": 1524133
+                }
+              }
+            ],
+            "metadata": {
+              "source_commit": "894da5ca7d742e4429ffb2af534fcda0103ef593",
+              "source_date_epoch": "1763603031"
+            }
+          }
+        },
+        {
+          "tool": "ffprobe",
+          "version": "8.0.1",
+          "source": {
+            "url": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+            "source_ref": "n8.0.1@894da5ca7d742e4429ffb2af534fcda0103ef593",
+            "filename": "ffmpeg-8.0.1.tar.xz",
+            "archive_format": "tar-xz",
+            "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+            "size": 11388848
+          },
+          "executables": [{ "archive_path": "bin/ffprobe", "sha256": null, "size": null }],
+          "distribution": {
+            "kind": "native-build",
+            "receipt_file": "ffmpeg-build-receipt.v1.json"
+          },
+          "provenance": {
+            "repository": "https://github.com/FFmpeg/FFmpeg",
+            "license": "GPL build due to --enable-gpl and libx264; distribution requires separate license review",
+            "build_definition": ".github/workflows/sidecars.yml",
+            "build_inputs": [],
+            "metadata": {
+              "source_commit": "894da5ca7d742e4429ffb2af534fcda0103ef593",
+              "source_date_epoch": "1763603031"
+            }
+          }
+        },
+        {
+          "tool": "deno",
+          "version": "2.8.1",
+          "source": {
+            "url": "https://github.com/denoland/deno/releases/download/v2.8.1/deno-x86_64-apple-darwin.zip",
+            "source_ref": "v2.8.1",
+            "filename": "deno-x86_64-apple-darwin.zip",
+            "archive_format": "zip",
+            "sha256": "47473845e0522ba11dd279e3dd318e2d84ee200c56b8280594e0ae0b0f827460",
+            "size": 42745684
+          },
+          "executables": [
+            {
+              "archive_path": "deno",
+              "sha256": "a38eb0bd7716493a046d4cb49af27efbc43232d9b3894406ffcd57f38e2d93cd",
+              "size": 101805088
+            }
+          ],
+          "distribution": { "kind": "upstream-release" },
+          "provenance": {
+            "repository": "https://github.com/denoland/deno",
+            "license": "MIT",
+            "build_definition": null,
+            "build_inputs": [],
+            "metadata": { "release_asset": "deno-x86_64-apple-darwin.zip" }
+          }
+        }
+      ]
+    },
+    {
+      "target": "aarch64-apple-darwin",
+      "tools": [
+        {
+          "tool": "yt-dlp",
+          "version": "2026.06.09",
+          "source": {
+            "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp_macos",
+            "source_ref": "2026.06.09",
+            "filename": "yt-dlp_macos",
+            "archive_format": "raw",
+            "sha256": "b82c3626952e6c14eaf654cc565866775ffd0b9ffb7021628ac59b42c2f4f244",
+            "size": 36478448
+          },
+          "executables": [
+            {
+              "archive_path": "yt-dlp_macos",
+              "sha256": "b82c3626952e6c14eaf654cc565866775ffd0b9ffb7021628ac59b42c2f4f244",
+              "size": 36478448
+            }
+          ],
+          "distribution": { "kind": "upstream-release" },
+          "provenance": {
+            "repository": "https://github.com/yt-dlp/yt-dlp",
+            "license": "GPL-3.0-or-later for the standalone executable; see upstream THIRD_PARTY_LICENSES.txt",
+            "build_definition": null,
+            "build_inputs": [],
+            "metadata": { "release_asset": "yt-dlp_macos universal binary" }
+          }
+        },
+        {
+          "tool": "ffmpeg",
+          "version": "8.0.1",
+          "source": {
+            "url": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+            "source_ref": "n8.0.1@894da5ca7d742e4429ffb2af534fcda0103ef593",
+            "filename": "ffmpeg-8.0.1.tar.xz",
+            "archive_format": "tar-xz",
+            "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+            "size": 11388848
+          },
+          "executables": [{ "archive_path": "bin/ffmpeg", "sha256": null, "size": null }],
+          "distribution": {
+            "kind": "native-build",
+            "receipt_file": "ffmpeg-build-receipt.v1.json"
+          },
+          "provenance": {
+            "repository": "https://github.com/FFmpeg/FFmpeg",
+            "license": "GPL build due to --enable-gpl and libx264; distribution requires separate license review",
+            "build_definition": ".github/workflows/sidecars.yml",
+            "build_inputs": [
+              {
+                "name": "x264",
+                "source": {
+                  "url": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+                  "source_ref": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+                  "filename": "x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+                  "archive_format": "tar-gz",
+                  "sha256": "cd71a7515b0e9a012e1ac9b1f8415bebcaf6fc97d4db32286642ac4c0fbe24f9",
+                  "size": 1040327
+                }
+              },
+              {
+                "name": "lame",
+                "source": {
+                  "url": "https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz",
+                  "source_ref": "3.100",
+                  "filename": "lame-3.100.tar.gz",
+                  "archive_format": "tar-gz",
+                  "sha256": "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e",
+                  "size": 1524133
+                }
+              }
+            ],
+            "metadata": {
+              "source_commit": "894da5ca7d742e4429ffb2af534fcda0103ef593",
+              "source_date_epoch": "1763603031"
+            }
+          }
+        },
+        {
+          "tool": "ffprobe",
+          "version": "8.0.1",
+          "source": {
+            "url": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+            "source_ref": "n8.0.1@894da5ca7d742e4429ffb2af534fcda0103ef593",
+            "filename": "ffmpeg-8.0.1.tar.xz",
+            "archive_format": "tar-xz",
+            "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+            "size": 11388848
+          },
+          "executables": [{ "archive_path": "bin/ffprobe", "sha256": null, "size": null }],
+          "distribution": {
+            "kind": "native-build",
+            "receipt_file": "ffmpeg-build-receipt.v1.json"
+          },
+          "provenance": {
+            "repository": "https://github.com/FFmpeg/FFmpeg",
+            "license": "GPL build due to --enable-gpl and libx264; distribution requires separate license review",
+            "build_definition": ".github/workflows/sidecars.yml",
+            "build_inputs": [],
+            "metadata": {
+              "source_commit": "894da5ca7d742e4429ffb2af534fcda0103ef593",
+              "source_date_epoch": "1763603031"
+            }
+          }
+        },
+        {
+          "tool": "deno",
+          "version": "2.8.1",
+          "source": {
+            "url": "https://github.com/denoland/deno/releases/download/v2.8.1/deno-aarch64-apple-darwin.zip",
+            "source_ref": "v2.8.1",
+            "filename": "deno-aarch64-apple-darwin.zip",
+            "archive_format": "zip",
+            "sha256": "8154e2de0ee8c1cae31fa88e078724aaef0295fab9fd2ad6f8520389cee908f6",
+            "size": 39458364
+          },
+          "executables": [
+            {
+              "archive_path": "deno",
+              "sha256": "ce89814370dfcd0163ed03580bea2f01766b791d1531f0366da4f649663f77e4",
+              "size": 89024592
+            }
+          ],
+          "distribution": { "kind": "upstream-release" },
+          "provenance": {
+            "repository": "https://github.com/denoland/deno",
+            "license": "MIT",
+            "build_definition": null,
+            "build_inputs": [],
+            "metadata": { "release_asset": "deno-aarch64-apple-darwin.zip" }
+          }
+        }
+      ]
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "tools": [
+        {
+          "tool": "yt-dlp",
+          "version": "2026.06.09",
+          "source": {
+            "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp_linux",
+            "source_ref": "2026.06.09",
+            "filename": "yt-dlp_linux",
+            "archive_format": "raw",
+            "sha256": "bf8aac79b72287a6d2043074415132558b43743a8f9461a22b0141e90f16ce66",
+            "size": 39875976
+          },
+          "executables": [
+            {
+              "archive_path": "yt-dlp_linux",
+              "sha256": "bf8aac79b72287a6d2043074415132558b43743a8f9461a22b0141e90f16ce66",
+              "size": 39875976
+            }
+          ],
+          "distribution": { "kind": "upstream-release" },
+          "provenance": {
+            "repository": "https://github.com/yt-dlp/yt-dlp",
+            "license": "GPL-3.0-or-later for the standalone executable; see upstream THIRD_PARTY_LICENSES.txt",
+            "build_definition": null,
+            "build_inputs": [],
+            "metadata": { "release_asset": "yt-dlp_linux" }
+          }
+        },
+        {
+          "tool": "ffmpeg",
+          "version": "8.0.1",
+          "source": {
+            "url": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+            "source_ref": "n8.0.1@894da5ca7d742e4429ffb2af534fcda0103ef593",
+            "filename": "ffmpeg-8.0.1.tar.xz",
+            "archive_format": "tar-xz",
+            "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+            "size": 11388848
+          },
+          "executables": [{ "archive_path": "bin/ffmpeg", "sha256": null, "size": null }],
+          "distribution": {
+            "kind": "native-build",
+            "receipt_file": "ffmpeg-build-receipt.v1.json"
+          },
+          "provenance": {
+            "repository": "https://github.com/FFmpeg/FFmpeg",
+            "license": "GPL build due to --enable-gpl and libx264; distribution requires separate license review",
+            "build_definition": ".github/workflows/sidecars.yml",
+            "build_inputs": [
+              {
+                "name": "x264",
+                "source": {
+                  "url": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+                  "source_ref": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+                  "filename": "x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+                  "archive_format": "tar-gz",
+                  "sha256": "cd71a7515b0e9a012e1ac9b1f8415bebcaf6fc97d4db32286642ac4c0fbe24f9",
+                  "size": 1040327
+                }
+              },
+              {
+                "name": "lame",
+                "source": {
+                  "url": "https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz",
+                  "source_ref": "3.100",
+                  "filename": "lame-3.100.tar.gz",
+                  "archive_format": "tar-gz",
+                  "sha256": "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e",
+                  "size": 1524133
+                }
+              }
+            ],
+            "metadata": {
+              "source_commit": "894da5ca7d742e4429ffb2af534fcda0103ef593",
+              "source_date_epoch": "1763603031"
+            }
+          }
+        },
+        {
+          "tool": "ffprobe",
+          "version": "8.0.1",
+          "source": {
+            "url": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+            "source_ref": "n8.0.1@894da5ca7d742e4429ffb2af534fcda0103ef593",
+            "filename": "ffmpeg-8.0.1.tar.xz",
+            "archive_format": "tar-xz",
+            "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+            "size": 11388848
+          },
+          "executables": [{ "archive_path": "bin/ffprobe", "sha256": null, "size": null }],
+          "distribution": {
+            "kind": "native-build",
+            "receipt_file": "ffmpeg-build-receipt.v1.json"
+          },
+          "provenance": {
+            "repository": "https://github.com/FFmpeg/FFmpeg",
+            "license": "GPL build due to --enable-gpl and libx264; distribution requires separate license review",
+            "build_definition": ".github/workflows/sidecars.yml",
+            "build_inputs": [],
+            "metadata": {
+              "source_commit": "894da5ca7d742e4429ffb2af534fcda0103ef593",
+              "source_date_epoch": "1763603031"
+            }
+          }
+        },
+        {
+          "tool": "deno",
+          "version": "2.8.1",
+          "source": {
+            "url": "https://github.com/denoland/deno/releases/download/v2.8.1/deno-x86_64-unknown-linux-gnu.zip",
+            "source_ref": "v2.8.1",
+            "filename": "deno-x86_64-unknown-linux-gnu.zip",
+            "archive_format": "zip",
+            "sha256": "2d7bb6195226ac832e0bf7109a115f0af65ee69ac797a4bbde5b27a06cc242d9",
+            "size": 46052410
+          },
+          "executables": [
+            {
+              "archive_path": "deno",
+              "sha256": "e22e7be8c8fab241ec6da4960c50fe72f180a76321a35985cc22791c85aa05ca",
+              "size": 115453888
+            }
+          ],
+          "distribution": { "kind": "upstream-release" },
+          "provenance": {
+            "repository": "https://github.com/denoland/deno",
+            "license": "MIT",
+            "build_definition": null,
+            "build_inputs": [],
+            "metadata": { "release_asset": "deno-x86_64-unknown-linux-gnu.zip" }
+          }
+        }
+      ]
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "tools": [
+        {
+          "tool": "yt-dlp",
+          "version": "2026.06.09",
+          "source": {
+            "url": "https://github.com/yt-dlp/yt-dlp/releases/download/2026.06.09/yt-dlp_linux_aarch64",
+            "source_ref": "2026.06.09",
+            "filename": "yt-dlp_linux_aarch64",
+            "archive_format": "raw",
+            "sha256": "cabd246445bdfde0eda0dfe68bbe90354be83f3fdbbf077df11a2ea55f41cdbd",
+            "size": 39628336
+          },
+          "executables": [
+            {
+              "archive_path": "yt-dlp_linux_aarch64",
+              "sha256": "cabd246445bdfde0eda0dfe68bbe90354be83f3fdbbf077df11a2ea55f41cdbd",
+              "size": 39628336
+            }
+          ],
+          "distribution": { "kind": "upstream-release" },
+          "provenance": {
+            "repository": "https://github.com/yt-dlp/yt-dlp",
+            "license": "GPL-3.0-or-later for the standalone executable; see upstream THIRD_PARTY_LICENSES.txt",
+            "build_definition": null,
+            "build_inputs": [],
+            "metadata": { "release_asset": "yt-dlp_linux_aarch64" }
+          }
+        },
+        {
+          "tool": "ffmpeg",
+          "version": "8.0.1",
+          "source": {
+            "url": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+            "source_ref": "n8.0.1@894da5ca7d742e4429ffb2af534fcda0103ef593",
+            "filename": "ffmpeg-8.0.1.tar.xz",
+            "archive_format": "tar-xz",
+            "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+            "size": 11388848
+          },
+          "executables": [{ "archive_path": "bin/ffmpeg", "sha256": null, "size": null }],
+          "distribution": {
+            "kind": "native-build",
+            "receipt_file": "ffmpeg-build-receipt.v1.json"
+          },
+          "provenance": {
+            "repository": "https://github.com/FFmpeg/FFmpeg",
+            "license": "GPL build due to --enable-gpl and libx264; distribution requires separate license review",
+            "build_definition": ".github/workflows/sidecars.yml",
+            "build_inputs": [
+              {
+                "name": "x264",
+                "source": {
+                  "url": "https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+                  "source_ref": "b35605ace3ddf7c1a5d67a2eb553f034aef41d55",
+                  "filename": "x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.gz",
+                  "archive_format": "tar-gz",
+                  "sha256": "cd71a7515b0e9a012e1ac9b1f8415bebcaf6fc97d4db32286642ac4c0fbe24f9",
+                  "size": 1040327
+                }
+              },
+              {
+                "name": "lame",
+                "source": {
+                  "url": "https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz",
+                  "source_ref": "3.100",
+                  "filename": "lame-3.100.tar.gz",
+                  "archive_format": "tar-gz",
+                  "sha256": "ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e",
+                  "size": 1524133
+                }
+              }
+            ],
+            "metadata": {
+              "source_commit": "894da5ca7d742e4429ffb2af534fcda0103ef593",
+              "source_date_epoch": "1763603031"
+            }
+          }
+        },
+        {
+          "tool": "ffprobe",
+          "version": "8.0.1",
+          "source": {
+            "url": "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.xz",
+            "source_ref": "n8.0.1@894da5ca7d742e4429ffb2af534fcda0103ef593",
+            "filename": "ffmpeg-8.0.1.tar.xz",
+            "archive_format": "tar-xz",
+            "sha256": "05ee0b03119b45c0bdb4df654b96802e909e0a752f72e4fe3794f487229e5a41",
+            "size": 11388848
+          },
+          "executables": [{ "archive_path": "bin/ffprobe", "sha256": null, "size": null }],
+          "distribution": {
+            "kind": "native-build",
+            "receipt_file": "ffmpeg-build-receipt.v1.json"
+          },
+          "provenance": {
+            "repository": "https://github.com/FFmpeg/FFmpeg",
+            "license": "GPL build due to --enable-gpl and libx264; distribution requires separate license review",
+            "build_definition": ".github/workflows/sidecars.yml",
+            "build_inputs": [],
+            "metadata": {
+              "source_commit": "894da5ca7d742e4429ffb2af534fcda0103ef593",
+              "source_date_epoch": "1763603031"
+            }
+          }
+        },
+        {
+          "tool": "deno",
+          "version": "2.8.1",
+          "source": {
+            "url": "https://github.com/denoland/deno/releases/download/v2.8.1/deno-aarch64-unknown-linux-gnu.zip",
+            "source_ref": "v2.8.1",
+            "filename": "deno-aarch64-unknown-linux-gnu.zip",
+            "archive_format": "zip",
+            "sha256": "67e9df91870fd0af700df924173e3009ea7ff6956e2c3c3bb86065d6070d0fd6",
+            "size": 43903578
+          },
+          "executables": [
+            {
+              "archive_path": "deno",
+              "sha256": "ba77545d3f6645019f78c35b4185e99eb535d5449f7ee41ceda8cb2c87044ed3",
+              "size": 104509136
+            }
+          ],
+          "distribution": { "kind": "upstream-release" },
+          "provenance": {
+            "repository": "https://github.com/denoland/deno",
+            "license": "MIT",
+            "build_definition": null,
+            "build_inputs": [],
+            "metadata": { "release_asset": "deno-aarch64-unknown-linux-gnu.zip" }
+          }
+        }
+      ]
+    }
+  ]
+}

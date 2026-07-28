@@ -3,6 +3,7 @@ members = [
   "apps/cli",
   "apps/desktop/src-tauri",
   "crates/engine",
+  "tools/xtask",
 ]
 resolver = "3"
 

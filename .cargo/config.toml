@@ -2,3 +2,4 @@
 check-all = "check --workspace --all-targets --all-features"
 lint = "clippy --workspace --all-targets --all-features -- -D warnings"
 test-all = "test --workspace --all-features"
+xtask = "run -p xtask --"

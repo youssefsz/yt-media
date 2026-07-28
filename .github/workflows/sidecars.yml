@@ -1,0 +1,166 @@
+name: Build verified sidecars
+
+on:
+  workflow_dispatch:
+    inputs:
+      ejs_smoke_url:
+        description: Optional public YouTube URL for the network-dependent yt-dlp/Deno smoke test
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sidecars-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Sidecars (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+            msystem: UCRT64
+            msys_packages: >-
+              base-devel
+              mingw-w64-ucrt-x86_64-toolchain
+              mingw-w64-ucrt-x86_64-pkgconf
+              nasm
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+            msystem: CLANGARM64
+            msys_packages: >-
+              base-devel
+              mingw-w64-clang-aarch64-toolchain
+              mingw-w64-clang-aarch64-pkgconf
+              nasm
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+
+    env:
+      EJS_SMOKE_URL: ${{ inputs.ejs_smoke_url }}
+      SIDECAR_TARGET: ${{ matrix.target }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            autoconf \
+            automake \
+            build-essential \
+            libtool \
+            nasm \
+            pkg-config \
+            yasm
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install autoconf automake libtool nasm pkg-config yasm
+
+      - name: Install Windows build environment
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          path-type: inherit
+          install: ${{ matrix.msys_packages }}
+
+      - name: Fetch pinned sources on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cargo xtask sidecars fetch --target "$SIDECAR_TARGET"
+
+      - name: Fetch pinned sources on Windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: cargo xtask sidecars fetch --target "$SIDECAR_TARGET"
+
+      - name: Build FFmpeg and FFprobe natively on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cargo xtask sidecars build --target "$SIDECAR_TARGET"
+
+      - name: Build FFmpeg and FFprobe natively on Windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: cargo xtask sidecars build --target "$SIDECAR_TARGET"
+
+      - name: Verify executable digests and versions on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cargo xtask sidecars verify --target "$SIDECAR_TARGET"
+
+      - name: Verify executable digests and versions on Windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: cargo xtask sidecars verify --target "$SIDECAR_TARGET"
+
+      - name: Probe required codecs, muxer, and Deno pairing on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cargo xtask sidecars probe --target "$SIDECAR_TARGET"
+          if [ -n "$EJS_SMOKE_URL" ]; then
+            cargo xtask sidecars probe \
+              --target "$SIDECAR_TARGET" \
+              --ejs-url "$EJS_SMOKE_URL"
+          fi
+
+      - name: Probe required codecs, muxer, and Deno pairing on Windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cargo xtask sidecars probe --target "$SIDECAR_TARGET"
+          if [ -n "$EJS_SMOKE_URL" ]; then
+            cargo xtask sidecars probe \
+              --target "$SIDECAR_TARGET" \
+              --ejs-url "$EJS_SMOKE_URL"
+          fi
+
+      - name: Stage Tauri-named sidecars on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: cargo xtask sidecars stage --target "$SIDECAR_TARGET"
+
+      - name: Stage Tauri-named sidecars on Windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: cargo xtask sidecars stage --target "$SIDECAR_TARGET"
+
+      - name: Upload private workflow artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: sidecars-${{ matrix.target }}
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
+          path: |
+            target/sidecars/${{ matrix.target }}
+            .sidecar-cache/targets/${{ matrix.target }}/ffmpeg-build-receipt.v1.json
+            sidecars/manifest.v1.json

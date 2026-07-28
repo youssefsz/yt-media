@@ -124,6 +124,15 @@ analysis or downloads.
   identity, execute restricted JavaScript, and require yt-dlp to accept that executable as its sole
   configured runtime. The explicit `--ejs-url` smoke exercises live EJS extraction separately and
   rejects yt-dlp's standard missing-runtime and challenge-solving warnings.
+- Preserve verified tar source files' ordinary Unix permission bits while stripping set-id and
+  sticky bits. Native configuration helpers such as `config.guess` require their upstream
+  executable bit; ZIP release tools continue to receive explicit post-verification permissions.
+- Build x264 without assembly only on Windows ARM64. CLANGARM64's COFF assembler cannot satisfy
+  x264's GNU AArch64 assembly probe, while the portable C implementation still supplies the
+  required libx264 H.264 encoder and remains subject to the same capability probe.
+- Retry only transient artifact-download failures (`408`, `429`, transport timeouts/connect
+  failures, and `5xx`) with a bounded three-attempt budget. Digest and exact-size checks remain
+  mandatory after every successful response.
 - No fixed Plan 01 requirement has been weakened or substituted.
 
 ## Completion Evidence

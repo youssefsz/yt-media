@@ -144,7 +144,7 @@ analysis or downloads.
   - `cargo test --workspace --all-features` passed 17 engine unit tests, 10 process integration
     tests, 10 `xtask` archive/checksum/EJS tests, and the committed-manifest contract test.
   - `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-    .github/workflows/sidecars.yml` passed.
+.github/workflows/sidecars.yml` passed.
   - `cargo xtask sidecars fetch --target <triple>` completed for all six target triples, including
     download and post-extraction digest verification.
   - The cached Windows x64 yt-dlp and Deno assets reported exact versions `2026.06.09` and `2.8.1`;

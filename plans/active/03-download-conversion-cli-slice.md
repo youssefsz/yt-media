@@ -1,12 +1,12 @@
 ---
 id: '03'
 title: Download and conversion CLI slice
-status: ready
+status: in-progress
 depends_on:
   - '02'
 unlocks:
   - '04'
-started_at: null
+started_at: '2026-07-28T22:44:44Z'
 completed_at: null
 implementation_commits: []
 ---

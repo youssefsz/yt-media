@@ -34,7 +34,7 @@ state first.
 | --- | ------------------------------------------------ | ----------- | ---------- | ------------------------------------------------------- |
 | 01  | Toolchain and engine foundations                 | `completed` | —          | [Plan 01](completed/01-toolchain-engine-foundations.md) |
 | 02  | Analysis engine and CLI slice                    | `completed` | 01         | [Plan 02](completed/02-analysis-cli-slice.md)           |
-| 03  | Download and conversion CLI slice                | `ready`     | 02         | [Plan 03](backlog/03-download-conversion-cli-slice.md)  |
+| 03  | Download and conversion CLI slice                | `in-progress` | 02       | [Plan 03](active/03-download-conversion-cli-slice.md)   |
 | 04  | Persistent jobs, recovery, and history           | `blocked`   | 03         | [Plan 04](backlog/04-persistent-jobs-recovery.md)       |
 | 05  | Desktop integration and typed IPC                | `blocked`   | 04         | [Plan 05](backlog/05-desktop-integration.md)            |
 | 06  | Desktop UI, accessibility, and motion            | `blocked`   | 05         | [Plan 06](backlog/06-desktop-ui.md)                     |

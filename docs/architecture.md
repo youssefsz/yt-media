@@ -54,8 +54,23 @@ API. Their command syntax and output formats must remain behind a version-aware 
 arguments are passed without shell interpolation, and child lifecycles are tied to cancellable
 jobs.
 
-No sidecar is committed until its distribution, update, checksum, provenance, and license strategy
-is documented.
+The process adapter owns one POSIX process group or Windows Job Object per invocation. It drains
+stdout and stderr concurrently, retains exact raw bytes within independent byte and line limits,
+and reaps the complete group after success, cancellation, timeout, or caller drop. A testable
+`ProcessRunner` port keeps process behavior out of media policy.
+
+Sidecars are described by the versioned manifest under `sidecars/`. Upstream downloads are checked
+before extraction; archive entries are normalized using portable path rules; links, special files,
+path traversal, absolute paths, and duplicate destinations are rejected. Native FFmpeg builds emit
+a target-specific receipt whose executable hashes are required before probes or staging.
+
+Runtime resolution is engine-owned and ordered: explicit override, verified managed update,
+verified bundled baseline, then development-only `PATH`. Production resolution never depends on
+`PATH`. Downloaded artifacts, build outputs, receipts, and staging directories are ignored; only
+manifests, build definitions, checksums, and provenance are committed.
+
+The manually dispatched six-runner workflow uploads private workflow artifacts. It never creates a
+public release. Distribution license review remains a separate release decision.
 
 ## Workspace Evolution
 

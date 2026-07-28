@@ -30,6 +30,10 @@ pnpm build
 
 Windows contributors must use the MSVC Rust toolchain required by Tauri.
 
+Sidecar supply-chain work additionally requires the native C build prerequisites listed in
+[`sidecars/README.md`](sidecars/README.md). Routine tests do not download or execute external media
+tools. Network-dependent fetches, native builds, and live EJS smoke tests are explicit commands.
+
 ## Pull Requests
 
 - Explain the user-visible outcome and architectural impact.

@@ -3,8 +3,9 @@
 Local-first media tooling built around one reusable Rust engine, with a command-line interface and
 a native cross-platform desktop application.
 
-> **Status:** repository foundation only. Media analysis, downloads, conversion, queueing, and the
-> approved product UI are intentionally not implemented yet.
+> **Status:** the toolchain and engine-process implementation is present; native artifacts still
+> require the six-target workflow verification recorded in Plan 01. Media analysis, downloads,
+> conversion, queueing, and the approved product UI are intentionally not implemented yet.
 
 ## Architecture
 
@@ -37,8 +38,8 @@ completed so work can continue without relying on chat history.
 - Vite 7 for frontend development and production bundling
 - Cargo and pnpm workspaces with committed lockfiles
 
-Dependencies are added only when real code needs them. The engine therefore begins
-dependency-free instead of carrying a speculative framework stack.
+Dependencies are added only when real code needs them. The engine currently owns the typed,
+asynchronous external-process boundary and verified tool resolution used by later media features.
 
 ## Prerequisites
 
@@ -68,6 +69,23 @@ pnpm test           # Rust workspace tests
 pnpm format:check   # Prettier and rustfmt verification
 cargo run -p yt-media-cli -- --help
 ```
+
+## External Tools
+
+The bundled baseline is pinned to yt-dlp `2026.06.09`, FFmpeg/FFprobe `8.0.1`, and Deno `2.8.1`.
+Downloaded binaries and native build outputs remain in ignored directories. The committed
+[sidecar inventory](sidecars/README.md) documents sources, checksums, native build flags, target
+names, smoke probes, and staging commands.
+
+Runtime resolution is deliberately ordered:
+
+1. an explicit per-tool development override;
+2. a checksum- and identity-verified managed update;
+3. the checksum- and identity-verified bundled baseline;
+4. development-only `PATH` discovery.
+
+Production mode is the default and never requires or consults `PATH`. Application adapters must
+opt into development discovery explicitly; they must not duplicate this policy.
 
 ## Design Reference
 

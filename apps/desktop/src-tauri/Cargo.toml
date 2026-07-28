@@ -1,0 +1,19 @@
+[package]
+name = "yt-media-desktop"
+description = "Native desktop shell for YT Media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "yt_media_desktop"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+tauri.workspace = true
+
+[lints]
+workspace = true

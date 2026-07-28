@@ -1,0 +1,12 @@
+[package]
+name = "yt-media-cli"
+description = "Command-line interface for the YT Media engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+clap.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,28 @@
+# JavaScript
+node_modules/
+dist/
+.svelte-kit/
+*.tsbuildinfo
+
+# Rust
+target/
+
+# Tauri-generated schemas and platform projects
+apps/desktop/src-tauri/gen/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Logs and reports
+*.log
+coverage/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

@@ -1,0 +1,31 @@
+{
+  "id": "dQw4w9WgXcQ",
+  "title": "Sanitized incompatible-codec fixture",
+  "duration": 75,
+  "availability": "public",
+  "live_status": "not_live",
+  "formats": [
+    {
+      "format_id": "vp9-progressive",
+      "ext": "webm",
+      "vcodec": "vp9",
+      "acodec": "opus",
+      "width": 1920,
+      "height": 1080,
+      "fps": 30,
+      "filesize": 18000000,
+      "tbr": 2000
+    },
+    {
+      "format_id": "h264-progressive",
+      "ext": "mp4",
+      "vcodec": "avc1.4d401f",
+      "acodec": "opus",
+      "width": 1280,
+      "height": 720,
+      "fps": 30,
+      "filesize": 9000000,
+      "tbr": 1000
+    }
+  ]
+}

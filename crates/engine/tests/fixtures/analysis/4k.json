@@ -1,0 +1,50 @@
+{
+  "id": "dQw4w9WgXcQ",
+  "title": "Sanitized 4K fixture",
+  "duration": 120,
+  "availability": "public",
+  "live_status": "not_live",
+  "formats": [
+    {
+      "format_id": "401",
+      "ext": "mp4",
+      "vcodec": "av01.0.12M.08",
+      "acodec": "none",
+      "width": 3840,
+      "height": 2160,
+      "fps": 60,
+      "filesize_approx": 80000000,
+      "vbr": 5000
+    },
+    {
+      "format_id": "271",
+      "ext": "webm",
+      "vcodec": "vp9",
+      "acodec": "none",
+      "width": 2560,
+      "height": 1440,
+      "fps": 30,
+      "filesize_approx": 40000000,
+      "vbr": 3000
+    },
+    {
+      "format_id": "137",
+      "ext": "mp4",
+      "vcodec": "avc1.640028",
+      "acodec": "none",
+      "width": 1920,
+      "height": 1080,
+      "fps": 30,
+      "filesize": 20000000,
+      "vbr": 1800
+    },
+    {
+      "format_id": "140",
+      "ext": "m4a",
+      "vcodec": "none",
+      "acodec": "mp4a.40.2",
+      "filesize": 2500000,
+      "abr": 128
+    }
+  ]
+}

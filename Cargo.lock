@@ -5035,6 +5035,11 @@ name = "yt-media-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "yt-media-engine",
 ]
 
 [[package]]
@@ -5058,6 +5063,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tokio-util",
+ "url",
 ]
 
 [[package]]

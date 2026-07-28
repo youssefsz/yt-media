@@ -1,0 +1,59 @@
+{
+  "id": "dQw4w9WgXcQ",
+  "title": "Sanitized progressive fixture",
+  "duration": 212.4,
+  "uploader": "Fixture Channel",
+  "view_count": 123456,
+  "upload_date": "20260701",
+  "availability": "public",
+  "live_status": "not_live",
+  "_type": "video",
+  "thumbnails": [
+    {
+      "url": "https://i.example.invalid/thumb.jpg",
+      "width": 1280,
+      "height": 720
+    }
+  ],
+  "formats": [
+    {
+      "format_id": "18",
+      "ext": "mp4",
+      "vcodec": "avc1.42001E",
+      "acodec": "mp4a.40.2",
+      "width": 640,
+      "height": 360,
+      "fps": 30,
+      "filesize": 5000000,
+      "tbr": 500
+    },
+    {
+      "format_id": "22",
+      "ext": "mp4",
+      "vcodec": "avc1.64001F",
+      "acodec": "mp4a.40.2",
+      "width": 1280,
+      "height": 720,
+      "fps": 30,
+      "filesize_approx": 10000000,
+      "tbr": 1000
+    },
+    {
+      "format_id": "140",
+      "ext": "m4a",
+      "vcodec": "none",
+      "acodec": "mp4a.40.2",
+      "filesize": 2000000,
+      "abr": 128
+    },
+    {
+      "format_id": "sb0",
+      "ext": "mhtml",
+      "vcodec": "none",
+      "acodec": "none"
+    }
+  ],
+  "future_field": {
+    "ignored": true
+  }
+}

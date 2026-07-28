@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "media": {
+    "id": "dQw4w9WgXcQ",
+    "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "title": "Sanitized progressive fixture",
+    "uploader": "Fixture Channel",
+    "duration": 212400,
+    "view_count": 123456,
+    "upload_date": "2026-07-01",
+    "thumbnails": [
+      {
+        "url": "https://i.example.invalid/thumb.jpg",
+        "width": 1280,
+        "height": 720
+      }
+    ],
+    "formats": [
+      {
+        "kind": "mp3",
+        "bitrate_kbps": 128,
+        "source": {
+          "format_id": "140",
+          "container": {
+            "name": "m4a",
+            "family": "m4a"
+          },
+          "video_codec": null,
+          "audio_codec": {
+            "name": "mp4a.40.2",
+            "family": "aac"
+          }
+        }
+      },
+      {
+        "kind": "mp3",
+        "bitrate_kbps": 192,
+        "source": {
+          "format_id": "140",
+          "container": {
+            "name": "m4a",
+            "family": "m4a"
+          },
+          "video_codec": null,
+          "audio_codec": {
+            "name": "mp4a.40.2",
+            "family": "aac"
+          }
+        }
+      },
+      {
+        "kind": "mp3",
+        "bitrate_kbps": 256,
+        "source": {
+          "format_id": "140",
+          "container": {
+            "name": "m4a",
+            "family": "m4a"
+          },
+          "video_codec": null,
+          "audio_codec": {
+            "name": "mp4a.40.2",
+            "family": "aac"
+          }
+        }
+      },
+      {
+        "kind": "mp3",
+        "bitrate_kbps": 320,
+        "source": {
+          "format_id": "140",
+          "container": {
+            "name": "m4a",
+            "family": "m4a"
+          },
+          "video_codec": null,
+          "audio_codec": {
+            "name": "mp4a.40.2",
+            "family": "aac"
+          }
+        }
+      },
+      {
+        "kind": "mp4",
+        "height": 720,
+        "width": 1280,
+        "fps": 30.0,
+        "estimated_size_bytes": 10000000,
+        "video_source": {
+          "format_id": "22",
+          "container": {
+            "name": "mp4",
+            "family": "mp4"
+          },
+          "video_codec": {
+            "name": "avc1.64001f",
+            "family": "h264"
+          },
+          "audio_codec": {
+            "name": "mp4a.40.2",
+            "family": "aac"
+          }
+        },
+        "audio_source": {
+          "format_id": "22",
+          "container": {
+            "name": "mp4",
+            "family": "mp4"
+          },
+          "video_codec": {
+            "name": "avc1.64001f",
+            "family": "h264"
+          },
+          "audio_codec": {
+            "name": "mp4a.40.2",
+            "family": "aac"
+          }
+        },
+        "compatibility": "none"
+      },
+      {
+        "kind": "mp4",
+        "height": 360,
+        "width": 640,
+        "fps": 30.0,
+        "estimated_size_bytes": 5000000,
+        "video_source": {
+          "format_id": "18",
+          "container": {
+            "name": "mp4",
+            "family": "mp4"
+          },
+          "video_codec": {
+            "name": "avc1.42001e",
+            "family": "h264"
+          },
+          "audio_codec": {
+            "name": "mp4a.40.2",
+            "family": "aac"
+          }
+        },
+        "audio_source": {
+          "format_id": "18",
+          "container": {
+            "name": "mp4",
+            "family": "mp4"
+          },
+          "video_codec": {
+            "name": "avc1.42001e",
+            "family": "h264"
+          },
+          "audio_codec": {
+            "name": "mp4a.40.2",
+            "family": "aac"
+          }
+        },
+        "compatibility": "none"
+      }
+    ],
+    "warnings": []
+  }
+}

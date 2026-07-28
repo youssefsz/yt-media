@@ -1,0 +1,16 @@
+{
+  "id": "dQw4w9WgXcQ",
+  "duration": 10,
+  "availability": "public",
+  "live_status": "not_live",
+  "formats": [
+    {
+      "format_id": "140",
+      "ext": "m4a",
+      "vcodec": "none",
+      "acodec": "mp4a.40.2",
+      "filesize": 200000,
+      "abr": 128
+    }
+  ]
+}

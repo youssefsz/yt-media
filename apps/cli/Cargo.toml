@@ -7,6 +7,30 @@ rust-version.workspace = true
 
 [dependencies]
 clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+yt-media-engine = { path = "../../crates/engine" }
+
+[dev-dependencies]
+tempfile = "3.24.0"
+
+[features]
+test-fixture = []
+
+[[bin]]
+name = "yt-media"
+path = "src/main.rs"
+
+[[bin]]
+name = "yt-media-tool-fixture"
+path = "tests/fixtures/tool_fixture.rs"
+required-features = ["test-fixture"]
+
+[[test]]
+name = "analyze_cli"
+path = "tests/analyze_cli.rs"
+required-features = ["test-fixture"]
 
 [lints]
 workspace = true

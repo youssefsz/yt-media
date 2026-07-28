@@ -1,0 +1,39 @@
+{
+  "id": "dQw4w9WgXcQ",
+  "title": "Sanitized high-frame-rate fixture",
+  "duration": 30,
+  "availability": "public",
+  "live_status": "not_live",
+  "formats": [
+    {
+      "format_id": "299",
+      "ext": "mp4",
+      "vcodec": "avc1.64002a",
+      "acodec": "none",
+      "width": 1920,
+      "height": 1080,
+      "fps": 60,
+      "filesize": 16000000,
+      "vbr": 3500
+    },
+    {
+      "format_id": "137",
+      "ext": "mp4",
+      "vcodec": "avc1.640028",
+      "acodec": "none",
+      "width": 1920,
+      "height": 1080,
+      "fps": 30,
+      "filesize": 9000000,
+      "vbr": 1800
+    },
+    {
+      "format_id": "140",
+      "ext": "m4a",
+      "vcodec": "none",
+      "acodec": "mp4a.40.2",
+      "filesize": 600000,
+      "abr": 128
+    }
+  ]
+}

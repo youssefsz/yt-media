@@ -21,10 +21,32 @@ crates/
 docs/
   architecture.md       Dependency rules and intended data flow
   design/               Approved UI reference and validation guidance
+plans/
+  README.md             Authoritative milestone registry and lifecycle
 ```
 
 All Rust packages belong to the root Cargo workspace. The desktop frontend belongs to the root
 pnpm workspace.
+
+## Plan Lifecycle
+
+Before implementing product work, read `plans/README.md` and inspect `plans/active/`.
+
+- The plan registry and each plan's frontmatter are authoritative. Do not rely on chat memory to
+  decide what is active or complete.
+- Continue the single `in-progress` plan when one exists. Do not start or combine another milestone
+  unless the user explicitly changes scope and the registry is updated first.
+- Start only a `ready` plan whose dependencies are `completed`. Follow the documented move, status,
+  timestamp, and commit workflow in `plans/README.md`.
+- Implement only the active plan's objective and acceptance criteria. Record a material deviation
+  in its Decisions and Deviations section before code depends on it.
+- Checked boxes do not prove completion. Run the required tests, commit the implementation, record
+  commit hashes and verification evidence, move the plan to `plans/completed/`, and unlock only its
+  declared successor.
+- Completed plans are historical records. Do not rewrite them except to correct factual
+  documentation errors.
+- If plan state, Git state, or implementation state disagree, stop product work and reconcile them
+  explicitly rather than guessing.
 
 ## Non-Negotiable Architecture
 

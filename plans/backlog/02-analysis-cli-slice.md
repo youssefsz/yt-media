@@ -1,0 +1,89 @@
+---
+id: '02'
+title: Analysis engine and CLI slice
+status: blocked
+depends_on:
+  - '01'
+unlocks:
+  - '03'
+started_at: null
+completed_at: null
+implementation_commits: []
+---
+
+# Plan 02: Analysis Engine and CLI Slice
+
+## Objective
+
+Implement the first real vertical slice: validate a public YouTube URL, analyze one on-demand video
+through yt-dlp, normalize its metadata and usable MP3/MP4 choices in the engine, and expose the same
+result through a human-readable and machine-readable CLI command.
+
+## Public Interfaces
+
+- Introduce engine types for `MediaUrl`, `MediaId`, `MediaInfo`, `Thumbnail`, `Duration`,
+  `OutputKind`, `FormatId`, `FormatOption`, codec/container descriptors, and typed `AnalyzeError`.
+- Expose an asynchronous analyzer service accepting a validated URL and cancellation token and
+  returning normalized `MediaInfo`; keep raw yt-dlp JSON private to the adapter.
+- Add:
+
+  ```text
+  yt-media analyze <URL> [--json] [--tool-dir <PATH>]
+  ```
+
+- Human output goes to stdout and actionable diagnostics to stderr. `--json` emits one stable JSON
+  document to stdout and no decorative text. Define documented exit codes for invalid input,
+  unsupported content, unavailable tools, extraction failure, cancellation, and internal failure.
+
+## Behavior
+
+- Accept single public on-demand YouTube videos, including normal watch URLs, `youtu.be` links, and
+  Shorts. Canonicalize host and video identity without following arbitrary non-YouTube redirects.
+- Reject playlists, active live streams, private/account-required videos, cookie/login options, and
+  unsupported hosts with typed user-facing errors. A URL containing both a video and playlist ID is
+  analyzed as the single video only.
+- Invoke yt-dlp with `--ignore-config`, no cookies, no playlist traversal, simulation, one
+  machine-readable JSON result, explicit Deno runtime path, and explicit FFmpeg location.
+- Parse only documented machine-readable output. Preserve unknown fields by ignoring them; reject
+  missing identity/title/duration or structurally invalid format data with contextual errors.
+- Normalize output choices:
+  - MP3 choices are 128, 192, 256, and 320 kbps when a usable audio source exists.
+  - MP4 choices are distinct available source heights, descending, without upscaling. Each choice
+    records fps, estimated size when available, selected source streams, and whether merge or
+    transcode will be required for H.264/AAC compatibility.
+  - Prefer native H.264 video and AAC/M4A audio at the selected height. Mark, but do not perform,
+    required transcoding when compatible streams are unavailable.
+- Treat title, uploader, view count, upload date, thumbnail URL, duration, filesize, and codec
+  details as untrusted external data. Bound strings and collections before exposing them.
+
+## Tests
+
+- Unit-test URL canonicalization and rejection across watch, short, shortened, playlist, live,
+  malformed, deceptive-host, non-HTTP, and oversized inputs.
+- Parse committed sanitized yt-dlp JSON fixtures for progressive, adaptive, audio-only, missing-size,
+  high-fps, 4K, and malformed responses.
+- Contract-test exact yt-dlp argv, config isolation, Deno/FFmpeg paths, cancellation, warning
+  handling, invalid UTF-8, non-zero exits, and output-size limits using the fixture process runner.
+- Black-box test the compiled CLI for human output, JSON schema, stderr separation, exit codes, and
+  Ctrl+C cancellation.
+- Provide an opt-in manual live smoke command for one maintainer-controlled public test video; it is
+  never a required routine CI test.
+
+## Acceptance Criteria
+
+- Engine and CLI return the same normalized result for every fixture.
+- No raw yt-dlp model escapes the adapter and no product rule is duplicated in the CLI.
+- `--json` output is documented and covered by compatibility tests.
+- Invalid or unsupported URLs fail before spawning yt-dlp whenever possible.
+- Unit, contract, CLI integration, and root quality gates pass on Windows, macOS, and Linux.
+- README documents the analysis command and the public-video-only v1 boundary.
+
+## Decisions and Deviations
+
+Record any accepted deviation here before code depends on it.
+
+## Completion Evidence
+
+- Completed at:
+- Implementation commits:
+- Verification commands and results:

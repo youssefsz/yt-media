@@ -17,10 +17,17 @@ crates/
 docs/
   architecture.md       Dependency rules and data flow
   design/               Approved UI reference and validation rules
+plans/                  Ordered implementation roadmap and status
 ```
 
 The desktop app and CLI will both depend on the engine. The engine must not depend on either
 presentation layer. See [docs/architecture.md](docs/architecture.md) and [AGENTS.md](AGENTS.md).
+
+## Implementation Roadmap
+
+Work is divided into dependency-ordered, independently verifiable milestones under
+[plans/](plans/README.md). The registry records exactly which plan is ready, active, blocked, or
+completed so work can continue without relying on chat history.
 
 ## Stack
 

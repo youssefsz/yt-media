@@ -10,19 +10,24 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use clap::{Parser, Subcommand, error::ErrorKind};
+use clap::{Parser, Subcommand, ValueEnum, error::ErrorKind};
 use serde::Serialize;
 use yt_media_engine::{
     analysis::{
         AnalysisTools, AnalyzeError, Analyzer, CompatibilityWork, FormatOption, MediaInfo, MediaUrl,
     },
     cancellation::CancellationToken,
+    download::{
+        AudioQuality, Destination, DownloadError, DownloadRequest, DownloadService, DownloadTools,
+        JobEvent, JobEventKind, JobStage, OutputName, OutputSelection, VideoQuality,
+    },
     resolver::{ResolutionMode, ToolResolutionConfig, ToolResolutionError, ToolResolver},
     target::SupportedTarget,
     tool::Tool,
 };
 
 const ANALYZE_SCHEMA_VERSION: u32 = 1;
+const DOWNLOAD_SCHEMA_VERSION: u32 = 1;
 
 /// Stable process exit codes for the CLI contract.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -40,6 +45,12 @@ pub enum ExitCode {
     AnalysisFailure = 5,
     /// Ctrl+C cancelled the operation after process-tree cleanup.
     Cancelled = 6,
+    /// Download, conversion, or output verification failed.
+    DownloadFailure = 7,
+    /// The destination, collision reservation, or final publication failed.
+    OutputFailure = 8,
+    /// An API caller paused the job after process-tree cleanup.
+    Paused = 9,
     /// The CLI adapter or runtime failed unexpectedly.
     InternalFailure = 70,
 }
@@ -78,6 +89,46 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         tool_dir: Option<PathBuf>,
     },
+    /// Download and produce one verified MP3 or MP4 file.
+    #[command(about = "Download one public, on-demand YouTube video")]
+    Download {
+        /// Standard watch, youtu.be, or Shorts URL.
+        url: String,
+        /// Output container.
+        #[arg(long, value_enum)]
+        format: CliOutputFormat,
+        /// MP3 bitrate (128, 192, 256, 320) or an available MP4 source height.
+        #[arg(long)]
+        quality: u32,
+        /// Existing writable output directory.
+        #[arg(long, value_name = "DIR")]
+        output: PathBuf,
+        /// Optional output stem; the extension is engine-owned.
+        #[arg(long)]
+        name: Option<String>,
+        /// Emit schema-versioned NDJSON events and a final result.
+        #[arg(long)]
+        json: bool,
+        /// Directory containing exact yt-dlp, `FFmpeg`, `FFprobe`, and Deno executables.
+        #[arg(long, value_name = "PATH")]
+        tool_dir: Option<PathBuf>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliOutputFormat {
+    Mp3,
+    Mp4,
+}
+
+struct DownloadCommandArgs {
+    url: String,
+    format: CliOutputFormat,
+    quality: u32,
+    output: PathBuf,
+    name: Option<String>,
+    json: bool,
+    tool_dir: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -86,7 +137,10 @@ enum CommandFailure {
     UnsupportedContent(String),
     UnavailableTools(String),
     Analysis(String),
+    Download(String),
+    Output(String),
     Cancelled,
+    Paused,
     Internal(String),
 }
 
@@ -97,7 +151,10 @@ impl CommandFailure {
             Self::UnsupportedContent(_) => ExitCode::UnsupportedContent,
             Self::UnavailableTools(_) => ExitCode::UnavailableTools,
             Self::Analysis(_) => ExitCode::AnalysisFailure,
+            Self::Download(_) => ExitCode::DownloadFailure,
+            Self::Output(_) => ExitCode::OutputFailure,
             Self::Cancelled => ExitCode::Cancelled,
+            Self::Paused => ExitCode::Paused,
             Self::Internal(_) => ExitCode::InternalFailure,
         }
     }
@@ -108,8 +165,11 @@ impl CommandFailure {
             | Self::UnsupportedContent(message)
             | Self::UnavailableTools(message)
             | Self::Analysis(message)
+            | Self::Download(message)
+            | Self::Output(message)
             | Self::Internal(message) => message,
-            Self::Cancelled => "analysis was cancelled",
+            Self::Cancelled => "operation was cancelled",
+            Self::Paused => "download was paused",
         }
     }
 }
@@ -118,6 +178,42 @@ impl CommandFailure {
 struct AnalyzeDocument<'a> {
     schema_version: u32,
     media: &'a MediaInfo,
+}
+
+#[derive(Serialize)]
+struct DownloadEventDocument<'a> {
+    schema_version: u32,
+    #[serde(flatten)]
+    event: &'a JobEvent,
+}
+
+#[derive(Serialize)]
+struct DownloadResultDocument<'a> {
+    schema_version: u32,
+    event: &'static str,
+    result: &'a yt_media_engine::download::DownloadResult,
+}
+
+#[derive(Serialize)]
+struct DownloadErrorDocument<'a> {
+    schema_version: u32,
+    event: &'static str,
+    job_id: &'a yt_media_engine::download::JobId,
+    error: DownloadErrorBody<'a>,
+}
+
+#[derive(Serialize)]
+struct DownloadErrorBody<'a> {
+    code: i32,
+    message: &'a str,
+}
+
+#[derive(Serialize)]
+struct DownloadLagDocument<'a> {
+    schema_version: u32,
+    event: &'static str,
+    job_id: &'a yt_media_engine::download::JobId,
+    dropped_events: u64,
 }
 
 /// Parses process arguments, executes the requested command, and writes the stable terminal
@@ -135,20 +231,21 @@ async fn run(arguments: Vec<OsString>, stdout: &mut dyn Write, stderr: &mut dyn 
         Err(error) => return render_clap_error(&error, stdout, stderr),
     };
     let cancellation = CancellationToken::new();
-    let operation = execute(cli.command, cancellation.clone());
-    tokio::pin!(operation);
-
-    let result = tokio::select! {
-        result = &mut operation => result,
-        signal = tokio::signal::ctrl_c() => {
-            match signal {
-                Ok(()) => {
-                    cancellation.cancel();
-                    operation.await
+    let result = {
+        let operation = execute(cli.command, cancellation.clone(), stdout, stderr);
+        tokio::pin!(operation);
+        tokio::select! {
+            result = &mut operation => result,
+            signal = tokio::signal::ctrl_c() => {
+                match signal {
+                    Ok(()) => {
+                        cancellation.cancel();
+                        operation.await
+                    }
+                    Err(error) => Err(CommandFailure::Internal(format!(
+                        "could not listen for Ctrl+C: {error}"
+                    ))),
                 }
-                Err(error) => Err(CommandFailure::Internal(format!(
-                    "could not listen for Ctrl+C: {error}"
-                ))),
             }
         }
     };
@@ -199,11 +296,14 @@ enum SuccessOutput {
         warnings: Vec<String>,
     },
     Json(Vec<u8>),
+    Written,
 }
 
 async fn execute(
     command: Command,
     cancellation: CancellationToken,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
 ) -> Result<SuccessOutput, CommandFailure> {
     match command {
         Command::Analyze {
@@ -211,6 +311,32 @@ async fn execute(
             json,
             tool_dir,
         } => execute_analyze(&url, json, tool_dir.as_deref(), cancellation).await,
+        Command::Download {
+            url,
+            format,
+            quality,
+            output,
+            name,
+            json,
+            tool_dir,
+        } => {
+            execute_download(
+                DownloadCommandArgs {
+                    url,
+                    format,
+                    quality,
+                    output,
+                    name,
+                    json,
+                    tool_dir,
+                },
+                cancellation,
+                stdout,
+                stderr,
+            )
+            .await?;
+            Ok(SuccessOutput::Written)
+        }
     }
 }
 
@@ -227,7 +353,7 @@ async fn execute_analyze(
             CommandFailure::InvalidInput(error.to_string())
         }
     })?;
-    let tools = resolve_tools(tool_directory, cancellation.child_token()).await?;
+    let tools = resolve_analysis_tools(tool_directory, cancellation.child_token()).await?;
     let analyzer = Analyzer::new(tools);
     let info = analyzer
         .analyze(&media_url, cancellation.clone())
@@ -252,7 +378,278 @@ async fn execute_analyze(
     }
 }
 
-async fn resolve_tools(
+async fn execute_download(
+    arguments: DownloadCommandArgs,
+    cancellation: CancellationToken,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<(), CommandFailure> {
+    let request = build_download_request(
+        &arguments.url,
+        arguments.format,
+        arguments.quality,
+        arguments.output,
+        arguments.name,
+    )?;
+    let tools =
+        resolve_download_tools(arguments.tool_dir.as_deref(), cancellation.child_token()).await?;
+    let started = DownloadService::new(tools).start(request);
+    drive_started_download(started, arguments.json, cancellation, stdout, stderr).await
+}
+
+fn build_download_request(
+    raw_url: &str,
+    format: CliOutputFormat,
+    quality: u32,
+    output: PathBuf,
+    name: Option<String>,
+) -> Result<DownloadRequest, CommandFailure> {
+    let media_url = MediaUrl::parse(raw_url).map_err(|error| {
+        if error.is_unsupported_content() {
+            CommandFailure::UnsupportedContent(error.to_string())
+        } else {
+            CommandFailure::InvalidInput(error.to_string())
+        }
+    })?;
+    let selection = match format {
+        CliOutputFormat::Mp3 => {
+            let bitrate = u16::try_from(quality).map_err(|_| {
+                CommandFailure::InvalidInput(format!(
+                    "invalid MP3 quality `{quality}`; expected 128, 192, 256, or 320"
+                ))
+            })?;
+            OutputSelection::Mp3(
+                AudioQuality::try_from(bitrate)
+                    .map_err(|error| CommandFailure::InvalidInput(error.to_string()))?,
+            )
+        }
+        CliOutputFormat::Mp4 => OutputSelection::Mp4(
+            VideoQuality::try_from(quality)
+                .map_err(|error| CommandFailure::InvalidInput(error.to_string()))?,
+        ),
+    };
+    let destination = Destination::new(output)
+        .map_err(|error| CommandFailure::InvalidInput(error.to_string()))?;
+    let name = name
+        .map(OutputName::new)
+        .transpose()
+        .map_err(|error| CommandFailure::InvalidInput(error.to_string()))?;
+    Ok(DownloadRequest {
+        url: media_url,
+        output: selection,
+        destination,
+        name,
+    })
+}
+
+async fn drive_started_download(
+    started: yt_media_engine::download::StartedDownload,
+    json: bool,
+    cancellation: CancellationToken,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<(), CommandFailure> {
+    let job_id = started.job_id;
+    let mut events = started.events;
+    let controls = started.controls;
+    let completion = started.completion.wait();
+    tokio::pin!(completion);
+    let mut cancellation_forwarded = false;
+
+    let result = loop {
+        tokio::select! {
+            result = &mut completion => break result,
+            event = events.recv() => {
+                match event {
+                    Ok(event) => {
+                        let rendered =
+                            render_event_for_mode(json, stdout, stderr, &event);
+                        if let Err(error) = rendered {
+                            controls.cancel();
+                            let _ignored = (&mut completion).await;
+                            return Err(CommandFailure::Internal(format!(
+                                "could not write download progress: {error}"
+                            )));
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
+                        let rendered = if json {
+                            write_json_line(
+                                stdout,
+                                &DownloadLagDocument {
+                                    schema_version: DOWNLOAD_SCHEMA_VERSION,
+                                    event: "stream-lagged",
+                                    job_id: &job_id,
+                                    dropped_events: count,
+                                },
+                            )
+                        } else {
+                            writeln!(
+                                stderr,
+                                "warning: progress renderer dropped {count} coalescible events"
+                            )
+                        };
+                        if let Err(error) = rendered {
+                            controls.cancel();
+                            let _ignored = (&mut completion).await;
+                            return Err(CommandFailure::Internal(format!(
+                                "could not write progress lag notice: {error}"
+                            )));
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {}
+                }
+            }
+            () = cancellation.cancelled(), if !cancellation_forwarded => {
+                cancellation_forwarded = true;
+                controls.cancel();
+            }
+        }
+    };
+
+    while let Ok(event) = events.try_recv() {
+        render_event_for_mode(json, stdout, stderr, &event).map_err(|error| {
+            CommandFailure::Internal(format!("could not write final download event: {error}"))
+        })?;
+    }
+    render_download_completion(result, &job_id, json, stdout)
+}
+
+fn render_event_for_mode(
+    json: bool,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+    event: &JobEvent,
+) -> io::Result<()> {
+    if json {
+        write_json_line(
+            stdout,
+            &DownloadEventDocument {
+                schema_version: DOWNLOAD_SCHEMA_VERSION,
+                event,
+            },
+        )
+    } else {
+        render_download_event(stderr, event)
+    }
+}
+
+fn render_download_completion(
+    result: Result<yt_media_engine::download::DownloadResult, DownloadError>,
+    job_id: &yt_media_engine::download::JobId,
+    json: bool,
+    stdout: &mut dyn Write,
+) -> Result<(), CommandFailure> {
+    match result {
+        Ok(result) => {
+            if json {
+                write_json_line(
+                    stdout,
+                    &DownloadResultDocument {
+                        schema_version: DOWNLOAD_SCHEMA_VERSION,
+                        event: "result",
+                        result: &result,
+                    },
+                )
+                .map_err(|error| {
+                    CommandFailure::Internal(format!(
+                        "could not write final download result: {error}"
+                    ))
+                })?;
+            } else {
+                writeln!(stdout, "{}", result.path.display()).map_err(|error| {
+                    CommandFailure::Internal(format!("could not write final output path: {error}"))
+                })?;
+            }
+            Ok(())
+        }
+        Err(error) => {
+            let failure = map_download_error(error);
+            if json {
+                write_json_line(
+                    stdout,
+                    &DownloadErrorDocument {
+                        schema_version: DOWNLOAD_SCHEMA_VERSION,
+                        event: "result",
+                        job_id,
+                        error: DownloadErrorBody {
+                            code: failure.exit_code().value(),
+                            message: failure.message(),
+                        },
+                    },
+                )
+                .map_err(|write_error| {
+                    CommandFailure::Internal(format!(
+                        "could not write final download error: {write_error}"
+                    ))
+                })?;
+            }
+            Err(failure)
+        }
+    }
+}
+
+fn render_download_event(writer: &mut dyn Write, event: &JobEvent) -> io::Result<()> {
+    match &event.kind {
+        JobEventKind::Stage { stage } => writeln!(writer, "{}", render_stage(*stage)),
+        JobEventKind::Progress { progress } => {
+            if let Some(percent) = progress.percent {
+                writeln!(writer, "{}: {percent:.1}%", render_stage(progress.stage))
+            } else {
+                writeln!(
+                    writer,
+                    "{}: {} bytes",
+                    render_stage(progress.stage),
+                    progress.completed
+                )
+            }
+        }
+        JobEventKind::Warning { message } => writeln!(writer, "warning: {message}"),
+    }
+}
+
+fn render_stage(stage: JobStage) -> &'static str {
+    match stage {
+        JobStage::Analyzing => "analyzing",
+        JobStage::Downloading => "downloading",
+        JobStage::Merging => "merging",
+        JobStage::Converting => "converting",
+        JobStage::Finalizing => "finalizing",
+        JobStage::Completed => "completed",
+        JobStage::Paused => "paused",
+        JobStage::Cancelled => "cancelled",
+        JobStage::Failed => "failed",
+    }
+}
+
+fn write_json_line(writer: &mut dyn Write, value: &impl Serialize) -> io::Result<()> {
+    serde_json::to_writer(&mut *writer, value).map_err(io::Error::other)?;
+    writer.write_all(b"\n")?;
+    writer.flush()
+}
+
+fn map_download_error(error: DownloadError) -> CommandFailure {
+    match error {
+        DownloadError::InvalidRequest(error) => CommandFailure::InvalidInput(error.to_string()),
+        DownloadError::Analysis(error) => map_analyze_error(error, false),
+        DownloadError::FormatUnavailable { .. } => CommandFailure::InvalidInput(error.to_string()),
+        DownloadError::Destination { .. }
+        | DownloadError::Filesystem { .. }
+        | DownloadError::CollisionLimit => CommandFailure::Output(format_error_chain(&error)),
+        DownloadError::Paused => CommandFailure::Paused,
+        DownloadError::Cancelled => CommandFailure::Cancelled,
+        DownloadError::Join(_) | DownloadError::CompletionClosed => {
+            CommandFailure::Internal(format_error_chain(&error))
+        }
+        DownloadError::ProcessSpecification(_)
+        | DownloadError::Process { .. }
+        | DownloadError::NonZero { .. }
+        | DownloadError::Protocol { .. }
+        | DownloadError::Verification(_) => CommandFailure::Download(format_error_chain(&error)),
+    }
+}
+
+async fn resolve_analysis_tools(
     tool_directory: Option<&Path>,
     cancellation: CancellationToken,
 ) -> Result<AnalysisTools, CommandFailure> {
@@ -291,6 +688,59 @@ async fn resolve_tools(
     )
     .await?;
     AnalysisTools::from_resolved(yt_dlp, ffmpeg, deno)
+        .map_err(|error| CommandFailure::Internal(error.to_string()))
+}
+
+async fn resolve_download_tools(
+    tool_directory: Option<&Path>,
+    cancellation: CancellationToken,
+) -> Result<DownloadTools, CommandFailure> {
+    let target =
+        SupportedTarget::current().map_err(|error| CommandFailure::Internal(error.to_string()))?;
+    let mut config = ToolResolutionConfig::default();
+    if let Some(directory) = tool_directory {
+        config.explicit_overrides = Tool::ALL
+            .into_iter()
+            .map(|tool| (tool, directory.join(tool.executable_name(target))))
+            .collect();
+    } else {
+        config.mode = ResolutionMode::Development;
+        config.path_environment = std::env::var_os("PATH");
+    }
+    let resolver = ToolResolver::default();
+    let yt_dlp = resolve_one(
+        &resolver,
+        Tool::YtDlp,
+        target,
+        &config,
+        cancellation.child_token(),
+    )
+    .await?;
+    let ffmpeg = resolve_one(
+        &resolver,
+        Tool::Ffmpeg,
+        target,
+        &config,
+        cancellation.child_token(),
+    )
+    .await?;
+    let ffprobe = resolve_one(
+        &resolver,
+        Tool::Ffprobe,
+        target,
+        &config,
+        cancellation.child_token(),
+    )
+    .await?;
+    let deno = resolve_one(
+        &resolver,
+        Tool::Deno,
+        target,
+        &config,
+        cancellation.child_token(),
+    )
+    .await?;
+    DownloadTools::from_resolved(yt_dlp, ffmpeg, ffprobe, deno)
         .map_err(|error| CommandFailure::Internal(error.to_string()))
 }
 
@@ -412,6 +862,7 @@ fn write_success(stdout: &mut dyn Write, output: &SuccessOutput) -> io::Result<(
     match output {
         SuccessOutput::Human { rendered, .. } => stdout.write_all(rendered.as_bytes()),
         SuccessOutput::Json(bytes) => stdout.write_all(bytes),
+        SuccessOutput::Written => Ok(()),
     }
 }
 
@@ -443,6 +894,9 @@ mod tests {
         assert_eq!(ExitCode::UnavailableTools.value(), 4);
         assert_eq!(ExitCode::AnalysisFailure.value(), 5);
         assert_eq!(ExitCode::Cancelled.value(), 6);
+        assert_eq!(ExitCode::DownloadFailure.value(), 7);
+        assert_eq!(ExitCode::OutputFailure.value(), 8);
+        assert_eq!(ExitCode::Paused.value(), 9);
         assert_eq!(ExitCode::InternalFailure.value(), 70);
     }
 

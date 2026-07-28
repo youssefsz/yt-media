@@ -3,9 +3,9 @@
 Local-first media tooling built around one reusable Rust engine, with a command-line interface and
 a native cross-platform desktop application.
 
-> **Status:** verified toolchain foundations and the public-video analysis CLI are implemented.
-> Downloads, conversion, queueing, and the approved product UI are intentionally not implemented
-> yet.
+> **Status:** verified toolchain foundations plus public-video analysis and download CLI slices are
+> implemented. Persistent jobs, recovery, and the approved product UI are intentionally not
+> implemented yet.
 
 ## Architecture
 
@@ -127,6 +127,42 @@ The complete field contract and compatibility policy are documented in
 
 Ctrl+C cancels through the engine token and the Plan 01 process owner terminates and reaps the
 complete yt-dlp process tree before exit.
+
+## Download and Convert
+
+Produce a constant-bitrate MP3:
+
+```bash
+cargo run -p yt-media-cli --bin yt-media -- download "$URL" \
+  --format mp3 --quality 192 --output "/selected/directory" \
+  --tool-dir "/path/to/verified/tools"
+```
+
+Produce a compatibility MP4 at one height returned by `analyze`:
+
+```bash
+cargo run -p yt-media-cli --bin yt-media -- download "$URL" \
+  --format mp4 --quality 1080 --output "/selected/directory" \
+  --tool-dir "/path/to/verified/tools"
+```
+
+MP3 quality is one of `128`, `192`, `256`, or `320` kbps. MP4 quality is an exact available source
+height and is never upscaled. The engine re-analyzes immediately before download, downloads the
+freshly selected sources, stream-copies compatible H.264/AAC media, transcodes incompatible streams
+with the locked compatibility settings, and verifies every successful output through FFprobe.
+
+`--name` supplies an optional stem. The engine sanitizes it for every supported filesystem and adds
+the extension. Existing files are never overwritten; collisions use deterministic ` (1)`, ` (2)`,
+and later suffixes.
+
+Human progress and warnings go to stderr. On success, stdout contains only the final path. `--json`
+emits versioned NDJSON events followed by one final result; the complete schema and exit-code
+contract are documented in [`docs/download-ndjson-v1.md`](docs/download-ndjson-v1.md).
+
+Pause is available through the reusable engine API. It stops and reaps the current process while
+retaining only documented yt-dlp resumable partials and a small versioned ownership marker. Ctrl+C
+requests cancellation, removes owned temporary, partial, and ownership files, and exits only after
+the child process tree is reaped.
 
 ### Opt-in live smoke
 

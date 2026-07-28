@@ -34,7 +34,7 @@ fn fixture_tool_directory() -> Result<TempDir, Box<dyn Error>> {
     let directory = tempdir()?;
     let target = SupportedTarget::current()?;
     let fixture = fixture_path()?;
-    for tool in [Tool::YtDlp, Tool::Ffmpeg, Tool::Deno] {
+    for tool in Tool::ALL {
         let destination = directory.path().join(tool.executable_name(target));
         fs::copy(&fixture, &destination)?;
         #[cfg(unix)]

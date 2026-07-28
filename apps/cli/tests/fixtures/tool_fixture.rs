@@ -5,7 +5,7 @@
 use std::{
     env,
     error::Error,
-    fs::OpenOptions,
+    fs::{self, OpenOptions},
     io::{self, Write},
     thread,
     time::Duration,
@@ -67,21 +67,62 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     if first == "-version" {
-        if !name.contains("ffmpeg") {
+        if name.contains("ffprobe") {
+            println!("ffprobe version 8.0.1");
+        } else if name.contains("ffmpeg") {
+            println!("ffmpeg version 8.0.1");
+        } else {
             return Err(format!("unexpected -version fixture name `{name}`").into());
         }
-        println!("ffmpeg version 8.0.1");
+        return Ok(());
+    }
+    if name.contains("ffprobe") {
+        write_probe()?;
+        return Ok(());
+    }
+    if name.contains("ffmpeg") {
+        let target = arguments
+            .last()
+            .ok_or("FFmpeg fixture received no target path")?;
+        fs::write(target, b"encoded CLI fixture")?;
+        write_stdout(b"out_time_us=106200000\nout_time_us=212400000\nprogress=end")?;
         return Ok(());
     }
     if !name.contains("yt-dlp") {
-        return Err(format!("only the yt-dlp fixture accepts analysis arguments: `{name}`").into());
+        return Err(format!("unexpected fixture invocation name: `{name}`").into());
+    }
+    if !arguments
+        .iter()
+        .any(|argument| argument == "--dump-single-json")
+    {
+        if env::var("YT_MEDIA_TEST_SCENARIO").as_deref() == Ok("download-sleep") {
+            sleep_with_heartbeat()?;
+            return Ok(());
+        }
+        let output_index = arguments
+            .iter()
+            .position(|argument| argument == "--output")
+            .and_then(|index| index.checked_add(1))
+            .ok_or("yt-dlp fixture received no output path")?;
+        let target = arguments
+            .get(output_index)
+            .ok_or("yt-dlp fixture output path was missing")?;
+        fs::write(target, b"downloaded CLI fixture")?;
+        eprintln!(
+            "yt-media-progress|downloading|50|100|100|10|5\nyt-media-progress|finished|100|100|100|0|0"
+        );
+        return Ok(());
     }
 
+    run_analysis_scenario()
+}
+
+fn run_analysis_scenario() -> Result<(), Box<dyn Error>> {
     match env::var("YT_MEDIA_TEST_SCENARIO")
         .unwrap_or_else(|_| "success".to_owned())
         .as_str()
     {
-        "success" => write_stdout(PROGRESSIVE)?,
+        "success" | "download-sleep" => write_stdout(PROGRESSIVE)?,
         "adaptive" => write_stdout(ADAPTIVE)?,
         "audio-only" => write_stdout(AUDIO_ONLY)?,
         "missing-size" => write_stdout(MISSING_SIZE)?,
@@ -109,6 +150,18 @@ fn run() -> Result<(), Box<dyn Error>> {
         scenario => return Err(format!("unknown test scenario `{scenario}`").into()),
     }
     Ok(())
+}
+
+fn write_probe() -> io::Result<()> {
+    if env::var("YT_MEDIA_TEST_OUTPUT_FORMAT").as_deref() == Ok("mp4") {
+        write_stdout(
+            br#"{"streams":[{"codec_type":"video","codec_name":"h264","width":1280,"height":720,"pix_fmt":"yuv420p"},{"codec_type":"audio","codec_name":"aac"}],"format":{"format_name":"mov,mp4","duration":"212.400"}}"#,
+        )
+    } else {
+        write_stdout(
+            br#"{"streams":[{"codec_type":"audio","codec_name":"mp3"}],"format":{"format_name":"mp3","duration":"212.400"}}"#,
+        )
+    }
 }
 
 fn write_stdout(bytes: &[u8]) -> io::Result<()> {

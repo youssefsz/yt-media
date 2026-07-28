@@ -56,19 +56,5 @@ fn committed_manifest_is_complete_and_matches_the_baseline() {
                 }
             }
         }
-
-        let ffmpeg = target_manifest.tool(Tool::Ffmpeg);
-        assert!(ffmpeg.is_some());
-        let patch = ffmpeg.and_then(|tool| {
-            tool.provenance
-                .metadata
-                .get("x264_source_patch")
-                .map(String::as_str)
-        });
-        if target == SupportedTarget::WindowsArm64 {
-            assert_eq!(patch, Some("windows-arm64-sse-arch-guard-v1"));
-        } else {
-            assert_eq!(patch, None);
-        }
     }
 }

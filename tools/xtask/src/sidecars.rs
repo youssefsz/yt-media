@@ -44,11 +44,17 @@ const BUILD_OUTPUT_LIMIT_BYTES: usize = 32 * 1024 * 1024;
 const BUILD_OUTPUT_LIMIT_LINES: usize = 200_000;
 const CONFIGURE_LOG_TAIL_BYTES: usize = 64 * 1024;
 const MAX_DOWNLOAD_ATTEMPTS: u8 = 3;
-const X264_WINDOWS_ARM64_PATCH_KEY: &str = "x264_source_patch";
-const X264_WINDOWS_ARM64_PATCH_ID: &str = "windows-arm64-sse-arch-guard-v1";
-const X264_SSE_GUARD: &str = "#if HAVE_VECTOREXT && defined(__SSE__)";
-const X264_WINDOWS_ARM64_SSE_GUARD: &str =
-    "#if (ARCH_X86 || ARCH_X86_64) && HAVE_VECTOREXT && defined(__SSE__)";
+const WINDOWS_ARM64_COMPILER_TARGET_PREFIX: &str = "aarch64-";
+const WINDOWS_ARM64_BUILD_ENVIRONMENT: [(&str, &str); 8] = [
+    ("CC", "clang"),
+    ("CXX", "clang++"),
+    ("AR", "ar"),
+    ("RANLIB", "ranlib"),
+    ("NM", "nm"),
+    ("STRIP", "strip"),
+    ("WINDRES", "windres"),
+    ("RC", "windres"),
+];
 
 /// Runs the `xtask` command-line interface.
 ///
@@ -532,10 +538,10 @@ impl SidecarContext {
             path: prefix.clone(),
             source,
         })?;
+        verify_native_build_toolchain(target, &build_root)?;
 
         let x264_source =
             self.prepare_build_source(&x264.source, &build_root.join("x264-source"))?;
-        apply_x264_target_patch(target, &x264_source, ffmpeg_manifest)?;
         let lame_source =
             self.prepare_build_source(&lame.source, &build_root.join("lame-source"))?;
         let ffmpeg_source =
@@ -566,6 +572,7 @@ impl SidecarContext {
             source_date_epoch,
         )?;
         let configuration = build_ffmpeg(
+            target,
             &ffmpeg_source,
             &prefix,
             &install,
@@ -609,7 +616,7 @@ impl SidecarContext {
         self.record_build_with_configuration(
             target,
             input,
-            ffmpeg_build_configuration(&prefix, &install)?,
+            ffmpeg_build_configuration(target, &prefix, &install)?,
         )
     }
 
@@ -1027,24 +1034,34 @@ fn build_codec_dependencies(
 ) -> Result<(), SidecarError> {
     let prefix = build_tool_path(prefix)?;
     let x264_configuration = x264_build_configuration(target, &prefix);
+    let x264_configure_environment = native_build_environment(
+        target,
+        &[("CFLAGS", cflags), ("SOURCE_DATE_EPOCH", source_date_epoch)],
+    );
     run_native_command(
         x264_source,
         "bash",
         x264_configuration,
-        &[("CFLAGS", cflags), ("SOURCE_DATE_EPOCH", source_date_epoch)],
+        &x264_configure_environment,
     )?;
+    let build_environment =
+        native_build_environment(target, &[("SOURCE_DATE_EPOCH", source_date_epoch)]);
     run_native_command(
         x264_source,
         "make",
         [OsString::from(format!("-j{jobs}"))],
-        &[("SOURCE_DATE_EPOCH", source_date_epoch)],
+        &build_environment,
     )?;
     run_native_command(
         x264_source,
         "make",
         [OsString::from("install")],
-        &[("SOURCE_DATE_EPOCH", source_date_epoch)],
+        &build_environment,
     )?;
+    let lame_configure_environment = native_build_environment(
+        target,
+        &[("CFLAGS", cflags), ("SOURCE_DATE_EPOCH", source_date_epoch)],
+    );
     run_native_command(
         lame_source,
         "bash",
@@ -1056,19 +1073,19 @@ fn build_codec_dependencies(
             OsString::from("--disable-frontend"),
             OsString::from("--with-pic"),
         ],
-        &[("CFLAGS", cflags), ("SOURCE_DATE_EPOCH", source_date_epoch)],
+        &lame_configure_environment,
     )?;
     run_native_command(
         lame_source,
         "make",
         [OsString::from(format!("-j{jobs}"))],
-        &[("SOURCE_DATE_EPOCH", source_date_epoch)],
+        &build_environment,
     )?;
     run_native_command(
         lame_source,
         "make",
         [OsString::from("install")],
-        &[("SOURCE_DATE_EPOCH", source_date_epoch)],
+        &build_environment,
     )
 }
 
@@ -1088,58 +1105,8 @@ fn x264_build_configuration(target: SupportedTarget, prefix: &str) -> Vec<OsStri
     configuration
 }
 
-fn apply_x264_target_patch(
-    target: SupportedTarget,
-    source_root: &Path,
-    ffmpeg_manifest: &ToolManifest,
-) -> Result<(), SidecarError> {
-    if target != SupportedTarget::WindowsArm64 {
-        return Ok(());
-    }
-
-    let recorded_patch = ffmpeg_manifest
-        .provenance
-        .metadata
-        .get(X264_WINDOWS_ARM64_PATCH_KEY)
-        .ok_or(SidecarError::BuildMetadataMissing {
-            field: X264_WINDOWS_ARM64_PATCH_KEY,
-        })?;
-    if recorded_patch != X264_WINDOWS_ARM64_PATCH_ID {
-        return Err(SidecarError::BuildMetadataMismatch {
-            field: X264_WINDOWS_ARM64_PATCH_KEY,
-            expected: X264_WINDOWS_ARM64_PATCH_ID,
-            found: recorded_patch.clone(),
-        });
-    }
-
-    apply_x264_windows_arm64_patch(source_root)
-}
-
-fn apply_x264_windows_arm64_patch(source_root: &Path) -> Result<(), SidecarError> {
-    let path = source_root.join("common").join("rectangle.h");
-    let source = fs::read_to_string(&path).map_err(|error| SidecarError::Io {
-        action: "read x264 Windows ARM64 patch target",
-        path: path.clone(),
-        source: error,
-    })?;
-    let matches = source.matches(X264_SSE_GUARD).count();
-    if matches != 1 {
-        return Err(SidecarError::SourcePatchMismatch {
-            patch: X264_WINDOWS_ARM64_PATCH_ID,
-            path,
-            expected_matches: 1,
-            found_matches: matches,
-        });
-    }
-    let patched = source.replacen(X264_SSE_GUARD, X264_WINDOWS_ARM64_SSE_GUARD, 1);
-    fs::write(&path, patched).map_err(|error| SidecarError::Io {
-        action: "write patched x264 Windows ARM64 source",
-        path,
-        source: error,
-    })
-}
-
 fn build_ffmpeg(
+    target: SupportedTarget,
     source: &Path,
     prefix: &Path,
     install: &Path,
@@ -1147,14 +1114,12 @@ fn build_ffmpeg(
     cflags: &str,
     source_date_epoch: &str,
 ) -> Result<Vec<String>, SidecarError> {
-    let configuration = ffmpeg_build_configuration(prefix, install)?;
+    let configuration = ffmpeg_build_configuration(target, prefix, install)?;
     let mut configure_arguments = vec![OsString::from("./configure")];
     configure_arguments.extend(configuration.iter().cloned().map(OsString::from));
     let pkg_config_path = build_tool_path(&prefix.join("lib").join("pkgconfig"))?;
-    let configure_result = run_native_command(
-        source,
-        "bash",
-        configure_arguments,
+    let configure_environment = native_build_environment(
+        target,
         &[
             ("CFLAGS", cflags),
             ("PKG_CONFIG_PATH", &pkg_config_path),
@@ -1162,6 +1127,8 @@ fn build_ffmpeg(
             ("ZERO_AR_DATE", "1"),
         ],
     );
+    let configure_result =
+        run_native_command(source, "bash", configure_arguments, &configure_environment);
     if let Err(source_error) = configure_result {
         let log_path = source.join("ffbuild").join("config.log");
         let log = read_file_tail(&log_path, CONFIGURE_LOG_TAIL_BYTES);
@@ -1174,31 +1141,36 @@ fn build_ffmpeg(
             Err(_) => Err(source_error),
         };
     }
-    run_native_command(
-        source,
-        "make",
-        [OsString::from(format!("-j{jobs}"))],
+    let build_environment = native_build_environment(
+        target,
         &[
             ("SOURCE_DATE_EPOCH", source_date_epoch),
             ("ZERO_AR_DATE", "1"),
         ],
+    );
+    run_native_command(
+        source,
+        "make",
+        [OsString::from(format!("-j{jobs}"))],
+        &build_environment,
     )?;
     run_native_command(
         source,
         "make",
         [OsString::from("install")],
-        &[
-            ("SOURCE_DATE_EPOCH", source_date_epoch),
-            ("ZERO_AR_DATE", "1"),
-        ],
+        &build_environment,
     )?;
     Ok(configuration)
 }
 
-fn ffmpeg_build_configuration(prefix: &Path, install: &Path) -> Result<Vec<String>, SidecarError> {
+fn ffmpeg_build_configuration(
+    target: SupportedTarget,
+    prefix: &Path,
+    install: &Path,
+) -> Result<Vec<String>, SidecarError> {
     let prefix = build_tool_path(prefix)?;
     let install = build_tool_path(install)?;
-    Ok(vec![
+    let mut configuration = vec![
         format!("--prefix={install}"),
         "--pkg-config-flags=--static".to_owned(),
         format!("--extra-cflags=-I{prefix}/include"),
@@ -1217,7 +1189,24 @@ fn ffmpeg_build_configuration(prefix: &Path, install: &Path) -> Result<Vec<Strin
         "--enable-ffmpeg".to_owned(),
         "--enable-ffprobe".to_owned(),
         "--disable-autodetect".to_owned(),
-    ])
+    ];
+    if target == SupportedTarget::WindowsArm64 {
+        configuration.extend(
+            [
+                "--cc=clang",
+                "--cxx=clang++",
+                "--ld=clang",
+                "--ar=ar",
+                "--nm=nm",
+                "--ranlib=ranlib",
+                "--strip=strip",
+                "--windres=windres",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        );
+    }
+    Ok(configuration)
 }
 
 fn build_tool_path(path: &Path) -> Result<String, SidecarError> {
@@ -1269,6 +1258,73 @@ fn read_file_tail(path: &Path, maximum_bytes: usize) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn native_build_environment<'a>(
+    target: SupportedTarget,
+    common: &[(&'a str, &'a str)],
+) -> Vec<(&'a str, &'a str)> {
+    let mut environment = common.to_vec();
+    if target == SupportedTarget::WindowsArm64 {
+        environment.extend(WINDOWS_ARM64_BUILD_ENVIRONMENT);
+    }
+    environment
+}
+
+fn verify_native_build_toolchain(
+    target: SupportedTarget,
+    directory: &Path,
+) -> Result<(), SidecarError> {
+    if target != SupportedTarget::WindowsArm64 {
+        return Ok(());
+    }
+    for (_, program) in WINDOWS_ARM64_BUILD_ENVIRONMENT {
+        find_program(program)?;
+    }
+    let environment = native_build_environment(target, &[]);
+    let output = execute_native_command(
+        directory,
+        "clang",
+        [OsString::from("-dumpmachine")],
+        &environment,
+    )?;
+    if !output.status.success {
+        return Err(SidecarError::BuildNonZero {
+            program: "clang".to_owned(),
+            code: output.status.code,
+        });
+    }
+    let compiler_target =
+        String::from_utf8(output.capture.stdout.bytes).map_err(SidecarError::CompilerTargetUtf8)?;
+    validate_compiler_target(target, &compiler_target)?;
+    writeln!(
+        io::stdout(),
+        "native compiler target: {}",
+        compiler_target.trim()
+    )
+    .map_err(|source| SidecarError::Io {
+        action: "write native compiler target",
+        path: directory.to_path_buf(),
+        source,
+    })
+}
+
+fn validate_compiler_target(
+    target: SupportedTarget,
+    compiler_target: &str,
+) -> Result<(), SidecarError> {
+    if target != SupportedTarget::WindowsArm64 {
+        return Ok(());
+    }
+    let found = compiler_target.trim().to_ascii_lowercase();
+    if found.starts_with(WINDOWS_ARM64_COMPILER_TARGET_PREFIX) {
+        Ok(())
+    } else {
+        Err(SidecarError::BuildCompilerTarget {
+            expected_prefix: WINDOWS_ARM64_COMPILER_TARGET_PREFIX,
+            found,
+        })
+    }
+}
+
 fn run_native_command<I>(
     directory: &Path,
     program: &str,
@@ -1278,19 +1334,7 @@ fn run_native_command<I>(
 where
     I: IntoIterator<Item = OsString>,
 {
-    let executable = find_program(program)?;
-    let mut spec = ProcessSpec::new(executable)
-        .arguments(arguments)
-        .current_directory(directory)
-        .timeout(Duration::from_hours(1));
-    for (name, value) in environment {
-        spec = spec.environment(*name, *value);
-    }
-    let limit = OutputLimit::new(BUILD_OUTPUT_LIMIT_BYTES, BUILD_OUTPUT_LIMIT_LINES)
-        .map_err(SidecarError::ProcessSpec)?;
-    let runtime = tokio::runtime::Runtime::new().map_err(SidecarError::Runtime)?;
-    let output = runtime
-        .block_on(TokioProcessRunner.run(spec.output_limit(limit), CancellationToken::new()))?;
+    let output = execute_native_command(directory, program, arguments, environment)?;
     io::stdout()
         .write_all(&output.capture.stdout.bytes)
         .map_err(|source| SidecarError::Io {
@@ -1313,6 +1357,31 @@ where
             code: output.status.code,
         })
     }
+}
+
+fn execute_native_command<I>(
+    directory: &Path,
+    program: &str,
+    arguments: I,
+    environment: &[(&str, &str)],
+) -> Result<yt_media_engine::process::ProcessOutput, SidecarError>
+where
+    I: IntoIterator<Item = OsString>,
+{
+    let executable = find_program(program)?;
+    let mut spec = ProcessSpec::new(executable)
+        .arguments(arguments)
+        .current_directory(directory)
+        .timeout(Duration::from_hours(1));
+    for (name, value) in environment {
+        spec = spec.environment(*name, *value);
+    }
+    let limit = OutputLimit::new(BUILD_OUTPUT_LIMIT_BYTES, BUILD_OUTPUT_LIMIT_LINES)
+        .map_err(SidecarError::ProcessSpec)?;
+    let runtime = tokio::runtime::Runtime::new().map_err(SidecarError::Runtime)?;
+    runtime
+        .block_on(TokioProcessRunner.run(spec.output_limit(limit), CancellationToken::new()))
+        .map_err(SidecarError::from)
 }
 
 fn find_program(name: &str) -> Result<PathBuf, SidecarError> {
@@ -1488,31 +1557,6 @@ pub enum SidecarError {
         /// Missing metadata field.
         field: &'static str,
     },
-    /// Required reproducibility metadata did not match the implemented build behavior.
-    #[error("FFmpeg build metadata `{field}` is `{found}`; expected `{expected}`")]
-    BuildMetadataMismatch {
-        /// Mismatched metadata field.
-        field: &'static str,
-        /// Required value.
-        expected: &'static str,
-        /// Recorded value.
-        found: String,
-    },
-    /// A pinned source no longer matched a narrowly scoped deterministic patch.
-    #[error(
-        "source patch `{patch}` matched {found_matches} location(s) in `{}`; expected {expected_matches}",
-        path.display()
-    )]
-    SourcePatchMismatch {
-        /// Stable patch identifier recorded in provenance.
-        patch: &'static str,
-        /// Source file that should contain the patch precondition.
-        path: PathBuf,
-        /// Required number of exact precondition matches.
-        expected_matches: usize,
-        /// Observed number of exact precondition matches.
-        found_matches: usize,
-    },
     /// `FFmpeg`'s configure probe failed and produced a bounded diagnostic log.
     #[error(
         "FFmpeg configure failed; tail of `{}` follows:\n{log}",
@@ -1665,6 +1709,17 @@ pub enum SidecarError {
         /// Missing program.
         program: String,
     },
+    /// The selected compiler did not produce code for the requested native target.
+    #[error("native compiler target `{found}` does not start with `{expected_prefix}`")]
+    BuildCompilerTarget {
+        /// Required machine-triple prefix.
+        expected_prefix: &'static str,
+        /// Machine triple reported by the selected compiler.
+        found: String,
+    },
+    /// Compiler target output was not UTF-8.
+    #[error("native compiler target output was not valid UTF-8")]
+    CompilerTargetUtf8(#[source] std::string::FromUtf8Error),
     /// Native build command failed.
     #[error("native build program `{program}` returned status {code:?}")]
     BuildNonZero {
@@ -1712,7 +1767,7 @@ impl From<ProcessError> for SidecarError {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, io::Write};
+    use std::{fs, io::Write, path::Path};
 
     use reqwest::StatusCode;
     use sha2::{Digest, Sha256};
@@ -1720,9 +1775,9 @@ mod tests {
     use yt_media_engine::target::SupportedTarget;
 
     use super::{
-        SidecarError, X264_SSE_GUARD, X264_WINDOWS_ARM64_SSE_GUARD, apply_x264_windows_arm64_patch,
-        is_retryable_download_status, msys_path, read_file_tail, reject_ejs_warnings, verify_file,
-        x264_build_configuration,
+        SidecarError, ffmpeg_build_configuration, is_retryable_download_status, msys_path,
+        native_build_environment, read_file_tail, reject_ejs_warnings, validate_compiler_target,
+        verify_file, x264_build_configuration,
     };
 
     #[test]
@@ -1836,44 +1891,70 @@ mod tests {
     }
 
     #[test]
-    fn patches_the_x264_sse_guard_exactly() {
-        let directory = tempdir();
-        assert!(directory.is_ok());
-        let Some(directory) = directory.ok() else {
-            return;
-        };
-        let common = directory.path().join("common");
-        assert!(fs::create_dir(&common).is_ok());
-        let path = common.join("rectangle.h");
-        let source = format!("before\n{X264_SSE_GUARD}\nafter\n");
-        assert!(fs::write(&path, source).is_ok());
+    fn selects_llvm_tools_only_for_windows_arm64() {
+        let common = [("SOURCE_DATE_EPOCH", "1")];
+        let windows_arm = native_build_environment(SupportedTarget::WindowsArm64, &common);
+        let windows_x64 = native_build_environment(SupportedTarget::WindowsX64, &common);
 
-        assert!(apply_x264_windows_arm64_patch(directory.path()).is_ok());
-        let patched = fs::read_to_string(path);
-        assert!(patched.is_ok());
-        let expected = format!("before\n{X264_WINDOWS_ARM64_SSE_GUARD}\nafter\n");
-        assert_eq!(patched.ok().as_deref(), Some(expected.as_str()));
+        assert!(windows_arm.contains(&("CC", "clang")));
+        assert!(windows_arm.contains(&("CXX", "clang++")));
+        assert!(windows_arm.contains(&("WINDRES", "windres")));
+        assert!(windows_arm.contains(&("RC", "windres")));
+        assert_eq!(windows_x64, common);
     }
 
     #[test]
-    fn fails_closed_when_the_x264_patch_precondition_changes() {
-        let directory = tempdir();
-        assert!(directory.is_ok());
-        let Some(directory) = directory.ok() else {
+    fn records_explicit_ffmpeg_tools_only_for_windows_arm64() {
+        let windows_arm = ffmpeg_build_configuration(
+            SupportedTarget::WindowsArm64,
+            Path::new("/prefix"),
+            Path::new("/install"),
+        );
+        let windows_x64 = ffmpeg_build_configuration(
+            SupportedTarget::WindowsX64,
+            Path::new("/prefix"),
+            Path::new("/install"),
+        );
+        assert!(windows_arm.is_ok());
+        assert!(windows_x64.is_ok());
+        let Some(windows_arm) = windows_arm.ok() else {
             return;
         };
-        let common = directory.path().join("common");
-        assert!(fs::create_dir(&common).is_ok());
-        assert!(fs::write(common.join("rectangle.h"), "changed upstream").is_ok());
+        let Some(windows_x64) = windows_x64.ok() else {
+            return;
+        };
 
-        let result = apply_x264_windows_arm64_patch(directory.path());
+        for argument in [
+            "--cc=clang",
+            "--cxx=clang++",
+            "--ld=clang",
+            "--ar=ar",
+            "--nm=nm",
+            "--ranlib=ranlib",
+            "--strip=strip",
+            "--windres=windres",
+        ] {
+            assert!(windows_arm.iter().any(|entry| entry == argument));
+            assert!(!windows_x64.iter().any(|entry| entry == argument));
+        }
+    }
+
+    #[test]
+    fn accepts_only_an_aarch64_compiler_for_windows_arm64() {
+        assert!(
+            validate_compiler_target(SupportedTarget::WindowsArm64, "aarch64-w64-windows-gnu\n")
+                .is_ok()
+        );
+        assert!(validate_compiler_target(SupportedTarget::WindowsX64, "x86_64-anything").is_ok());
+
+        let result = validate_compiler_target(SupportedTarget::WindowsArm64, "x86_64-w64-mingw32");
         assert!(matches!(
             result,
-            Err(SidecarError::SourcePatchMismatch {
-                expected_matches: 1,
-                found_matches: 0,
+            Err(SidecarError::BuildCompilerTarget {
+                expected_prefix: "aarch64-",
+                ref found,
                 ..
-            })
+            }) if found == "x86_64-w64-mingw32"
         ));
     }
 }

@@ -62,10 +62,11 @@ hands FFmpeg explicit local files.
 
 Windows ARM64 configures x264 with `--disable-asm` because CLANGARM64's COFF assembler cannot pass
 x264's GNU AArch64 assembly probe. The portable C implementation remains enabled and the workflow
-applies the manifest-recorded `windows-arm64-sse-arch-guard-v1` source patch, which makes x264's
-SSE vector branch explicitly require x86. Patch application fails closed unless its exact upstream
-precondition occurs once. The workflow still requires FFmpeg to expose the `libx264` encoder before
-it can stage an artifact.
+keeps the verified upstream source byte-exact. Every native dependency and FFmpeg build step
+explicitly selects CLANGARM64's `clang`, `clang++`, and target binutils rather than allowing
+Autoconf to find the x86_64 MinGW `gcc` exposed by the inherited runner `PATH`. Before compiling,
+xtask requires `clang -dumpmachine` to report an AArch64 target. The workflow still requires FFmpeg
+to expose the `libx264` encoder before it can stage an artifact.
 
 Expected native output names are `ffmpeg.exe` and `ffprobe.exe` on Windows, and `ffmpeg` and
 `ffprobe` elsewhere. A successful build records them as `bin/<name>` in

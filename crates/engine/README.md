@@ -14,5 +14,11 @@ Its current foundation provides:
 - deterministic override, managed, bundled, and development-only `PATH` resolution;
 - a shell-free asynchronous process port with raw-byte diagnostics and bounded output;
 - cancellation, timeout, child-tree termination, reaping, and caller-drop cleanup.
+- deterministic single-video `YouTube` URL validation and canonicalization;
+- a private, bounded, configuration-isolated yt-dlp analysis adapter with explicit Deno and
+  `FFmpeg` paths;
+- normalized bounded media metadata, source descriptors, MP3 bitrate choices, descending MP4
+  source heights, and explicit compatibility work.
 
-Media analysis and download policy intentionally arrive in later plans.
+Downloads, conversion, queueing, persistence, and presentation remain outside this crate's current
+implemented slice.

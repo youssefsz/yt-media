@@ -34,6 +34,16 @@ Sidecar supply-chain work additionally requires the native C build prerequisites
 [`sidecars/README.md`](sidecars/README.md). Routine tests do not download or execute external media
 tools. Network-dependent fetches, native builds, and live EJS smoke tests are explicit commands.
 
+Analysis tests use sanitized machine-readable JSON under
+`crates/engine/tests/fixtures/analysis/` and compiled tool fixtures. Keep fixture identities
+synthetic, deterministic, free of cookies and personal data, and small enough to review. Add or
+update parser, normalization, adapter-argv, and black-box CLI assertions whenever the analysis
+contract changes.
+
+The opt-in live analysis smoke is documented in the root README. A maintainer must explicitly set
+the public on-demand URL and verified tool directory; routine tests and CI must never select or
+contact a live third-party video.
+
 ## Pull Requests
 
 - Explain the user-visible outcome and architectural impact.

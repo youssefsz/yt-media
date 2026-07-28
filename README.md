@@ -3,9 +3,9 @@
 Local-first media tooling built around one reusable Rust engine, with a command-line interface and
 a native cross-platform desktop application.
 
-> **Status:** the toolchain and engine-process implementation is present; native artifacts still
-> require the six-target workflow verification recorded in Plan 01. Media analysis, downloads,
-> conversion, queueing, and the approved product UI are intentionally not implemented yet.
+> **Status:** verified toolchain foundations and the public-video analysis CLI are implemented.
+> Downloads, conversion, queueing, and the approved product UI are intentionally not implemented
+> yet.
 
 ## Architecture
 
@@ -38,8 +38,9 @@ completed so work can continue without relying on chat history.
 - Vite 7 for frontend development and production bundling
 - Cargo and pnpm workspaces with committed lockfiles
 
-Dependencies are added only when real code needs them. The engine currently owns the typed,
-asynchronous external-process boundary and verified tool resolution used by later media features.
+Dependencies are added only when real code needs them. The engine owns the typed asynchronous
+process boundary, verified tool resolution, URL policy, bounded yt-dlp adapter, normalized metadata,
+and deterministic MP3/MP4 format choices.
 
 ## Prerequisites
 
@@ -67,8 +68,86 @@ pnpm check          # strict Svelte and TypeScript checks
 pnpm lint           # ESLint and Clippy
 pnpm test           # Rust workspace tests
 pnpm format:check   # Prettier and rustfmt verification
-cargo run -p yt-media-cli -- --help
+cargo run -p yt-media-cli --bin yt-media -- --help
 ```
+
+## Analyze a Video
+
+Analyze one public, on-demand YouTube video without downloading it:
+
+```bash
+cargo run -p yt-media-cli --bin yt-media -- analyze \
+  "https://www.youtube.com/watch?v=dQw4w9WgXcQ" \
+  --tool-dir "/path/to/verified/tools"
+```
+
+Accepted inputs are standard `youtube.com/watch` URLs, `youtu.be` links, and Shorts URLs. A video
+URL that also contains a playlist parameter is treated as that one video. V1 does not accept
+playlist-only URLs, active or upcoming live streams, private or account-required videos, cookies,
+browser-cookie import, login mechanisms, unsupported hosts, or non-HTTP(S) URLs.
+
+`--tool-dir` must contain the current platform's exact `yt-dlp`, `ffmpeg`, and `deno` executable
+names. Each executable is canonicalized and identity-probed against the pinned Plan 01 version
+before analysis. When `--tool-dir` is omitted, the CLI enables the engine's development-only
+`PATH` discovery and performs the same identity probes; production resolution never uses `PATH`.
+
+Human output is written to stdout. Warnings and actionable failures are written to stderr:
+
+```text
+Title: Example video
+URL: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+Duration: 3:32
+Uploader: Example channel
+Formats:
+  MP3 128 kbps (source 140)
+  MP3 192 kbps (source 140)
+  MP3 256 kbps (source 140)
+  MP3 320 kbps (source 140)
+  MP4 1080p, 30 fps, 13500000 bytes (video 137, audio 140, merge)
+```
+
+Machine-readable mode emits exactly one JSON document and no decoration:
+
+```bash
+cargo run -p yt-media-cli --bin yt-media -- analyze "$URL" --json --tool-dir "$TOOL_DIR"
+```
+
+The complete field contract and compatibility policy are documented in
+[`docs/analyze-json-v1.md`](docs/analyze-json-v1.md).
+
+| Exit code | Meaning                                           |
+| --------- | ------------------------------------------------- |
+| `0`       | Success                                           |
+| `2`       | Invalid arguments or URL                          |
+| `3`       | Unsupported content                               |
+| `4`       | Required tool unavailable or invalid              |
+| `5`       | Extraction, bounded-protocol, or analysis failure |
+| `6`       | Cancelled with Ctrl+C after child-process cleanup |
+| `70`      | Internal CLI/runtime/output failure               |
+
+Ctrl+C cancels through the engine token and the Plan 01 process owner terminates and reaps the
+complete yt-dlp process tree before exit.
+
+### Opt-in live smoke
+
+Routine tests never contact YouTube. A maintainer can explicitly supply one controlled public,
+on-demand test video and verified tool directory:
+
+```bash
+export YT_MEDIA_SMOKE_URL="https://www.youtube.com/watch?v=MAINTAINER_VIDEO_ID"
+cargo run -p yt-media-cli --bin yt-media -- \
+  analyze "$YT_MEDIA_SMOKE_URL" --json --tool-dir "$TOOL_DIR"
+```
+
+PowerShell:
+
+```powershell
+$env:YT_MEDIA_SMOKE_URL = 'https://www.youtube.com/watch?v=MAINTAINER_VIDEO_ID'
+cargo run -p yt-media-cli --bin yt-media -- analyze `
+  $env:YT_MEDIA_SMOKE_URL --json --tool-dir $env:TOOL_DIR
+```
+
+The maintainer chooses and reviews that URL; no mutable third-party video is embedded in CI.
 
 ## External Tools
 

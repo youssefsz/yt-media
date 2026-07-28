@@ -38,6 +38,30 @@ The engine is the reusable product. Desktop and CLI are delivery mechanisms.
 The engine does not know about Tauri commands, webviews, Svelte stores, terminal colors, native
 dialogs, or window state.
 
+### Analysis boundary
+
+The analysis path is:
+
+```text
+CLI URL argument
+  -> engine MediaUrl validation and canonicalization
+  -> engine-owned verified tool resolution
+  -> private bounded yt-dlp adapter over ProcessRunner
+  -> private raw JSON records
+  -> validated public MediaInfo and FormatOption values
+  -> CLI human renderer or schema-versioned JSON wrapper
+```
+
+No process starts until the URL identifies one allowed YouTube video. The adapter uses
+`--ignore-config`, disables custom config and plugins, forbids playlist traversal, simulates without
+media download, requests one JSON document, and supplies explicit Deno and FFmpeg paths. stdout,
+stderr, strings, collections, numeric ranges, and diagnostic text are bounded before public
+exposure.
+
+MP3 bitrate choices and MP4 source selection are engine policy. MP4 choices preserve distinct source
+heights without upscaling, prefer H.264 and AAC/M4A, retain selected source IDs, and classify future
+merge/transcode work. The CLI does not interpret raw formats or reproduce that policy.
+
 ## Application Responsibilities
 
 The CLI translates arguments and signals into engine requests, renders progress, and maps outcomes
@@ -71,6 +95,10 @@ manifests, build definitions, checksums, and provenance are committed.
 
 The manually dispatched six-runner workflow uploads private workflow artifacts. It never creates a
 public release. Distribution license review remains a separate release decision.
+
+The analyze CLI opts into development-only `PATH` resolution only when no `--tool-dir` is supplied.
+Every discovered executable is canonicalized and identity-probed against the pinned baseline before
+use. Production application resolution remains independent of `PATH`.
 
 ## Workspace Evolution
 

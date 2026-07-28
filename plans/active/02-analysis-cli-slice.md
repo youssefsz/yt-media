@@ -80,7 +80,16 @@ result through a human-readable and machine-readable CLI command.
 
 ## Decisions and Deviations
 
-Record any accepted deviation here before code depends on it.
+- Version the CLI success document independently from yt-dlp as schema `1`; raw extractor JSON
+  remains private and forward-compatible through ignored unknown fields.
+- Cap a URL at 2 KiB, yt-dlp stdout/stderr at 4 MiB/256 KiB, formats at 512, thumbnails at 100
+  input records and 20 public records, and every exposed string at a field-specific limit.
+- Represent MP4 work as `none`, `merge`, `video-transcode`, `audio-transcode`, or
+  `video-and-audio-transcode`. A transcode classification may also require combining separately
+  selected streams; Plan 03 owns that orchestration.
+- Resolve and identity-probe yt-dlp, FFmpeg, and Deno through the Plan 01 resolver. The analyzer
+  receives only those explicit paths and reuses the existing `ProcessRunner`.
+- No fixed Plan 02 requirement is intentionally weakened or deferred.
 
 ## Completion Evidence
 

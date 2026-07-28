@@ -1,11 +1,11 @@
 ---
 id: '01'
 title: Toolchain and engine foundations
-status: ready
+status: in-progress
 depends_on: []
 unlocks:
   - '02'
-started_at: null
+started_at: '2026-07-28T15:49:13Z'
 completed_at: null
 implementation_commits: []
 ---

@@ -1,14 +1,16 @@
 ---
 id: '02'
 title: Analysis engine and CLI slice
-status: in-progress
+status: completed
 depends_on:
   - '01'
 unlocks:
   - '03'
 started_at: '2026-07-28T19:46:44Z'
-completed_at: null
-implementation_commits: []
+completed_at: '2026-07-28T20:36:13Z'
+implementation_commits:
+  - fc1a41a
+  - 6e61303
 ---
 
 # Plan 02: Analysis Engine and CLI Slice
@@ -93,6 +95,26 @@ result through a human-readable and machine-readable CLI command.
 
 ## Completion Evidence
 
-- Completed at:
+- Completed at: `2026-07-28T20:36:13Z`.
 - Implementation commits:
-- Verification commands and results:
+  - `fc1a41a` — bounded media analysis engine, URL validation, private yt-dlp adapter,
+    normalization rules, CLI command, fixtures, and contract/integration tests.
+  - `6e61303` — public JSON schema, architecture decision, user and contributor documentation,
+    and recorded Plan 02 decisions.
+- Local verification on commit `6e61303`:
+  - `pnpm format:check`, `pnpm lint`, `pnpm check`, `pnpm test`, and `pnpm build` passed on
+    2026-07-28.
+  - `cargo test --workspace --all-features` passed 37 engine analysis/unit tests, 10 process
+    integration tests, 2 CLI unit tests, 8 compiled CLI integration tests, 16 `xtask` tests, the
+    sidecar manifest contract test, and all doctests.
+  - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps` passed.
+  - Engine and CLI all-target, all-feature `cargo check` and Clippy passed for the
+    `x86_64-unknown-linux-gnu` target from Windows, in addition to the native Windows gates.
+  - `git diff --check` passed, and `git ls-files` found no tracked executable, library, archive, or
+    sidecar binary.
+- Hosted verification:
+  - [CI run `30396594762`](https://github.com/youssefsz/yt-media/actions/runs/30396594762)
+    passed the Linux quality gates, including the real Unix Ctrl+C and process-tree cleanup test,
+    plus native Rust workspace checks on Windows and macOS for `6e61303`.
+- The opt-in live smoke command is documented but was not run because routine verification uses
+  controlled fixtures and does not contact third-party media.

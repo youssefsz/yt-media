@@ -1,7 +1,7 @@
 ---
 id: '03'
 title: Download and conversion CLI slice
-status: blocked
+status: ready
 depends_on:
   - '02'
 unlocks:

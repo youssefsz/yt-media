@@ -1020,11 +1020,15 @@ fn build_codec_dependencies(
 ) -> Result<(), SidecarError> {
     let prefix = build_tool_path(prefix)?;
     let x264_configuration = x264_build_configuration(target, &prefix);
+    let x264_cflags = x264_compiler_flags(target, cflags);
     run_native_command(
         x264_source,
         "bash",
         x264_configuration,
-        &[("CFLAGS", cflags), ("SOURCE_DATE_EPOCH", source_date_epoch)],
+        &[
+            ("CFLAGS", &x264_cflags),
+            ("SOURCE_DATE_EPOCH", source_date_epoch),
+        ],
     )?;
     run_native_command(
         x264_source,
@@ -1079,6 +1083,16 @@ fn x264_build_configuration(target: SupportedTarget, prefix: &str) -> Vec<OsStri
         configuration.push(OsString::from("--disable-asm"));
     }
     configuration
+}
+
+fn x264_compiler_flags(target: SupportedTarget, common_flags: &str) -> String {
+    if target == SupportedTarget::WindowsArm64 {
+        // CLANGARM64 exposes __SSE__ for compatibility even though x264's x86-only v4si type is
+        // unavailable on AArch64. Keep the workaround isolated to x264's portable ARM64 build.
+        format!("{common_flags} -U__SSE__")
+    } else {
+        common_flags.to_owned()
+    }
 }
 
 fn build_ffmpeg(
@@ -1600,7 +1614,7 @@ mod tests {
 
     use super::{
         SidecarError, is_retryable_download_status, msys_path, reject_ejs_warnings, verify_file,
-        x264_build_configuration,
+        x264_build_configuration, x264_compiler_flags,
     };
 
     #[test]
@@ -1694,5 +1708,16 @@ mod tests {
                 .iter()
                 .any(|argument| argument == "--disable-asm")
         );
+    }
+
+    #[test]
+    fn undefines_x86_sse_macro_only_for_windows_arm64_x264() {
+        let windows_arm = x264_compiler_flags(SupportedTarget::WindowsArm64, "-O2");
+        let windows_x64 = x264_compiler_flags(SupportedTarget::WindowsX64, "-O2");
+        let linux_arm = x264_compiler_flags(SupportedTarget::LinuxArm64, "-O2");
+
+        assert_eq!(windows_arm, "-O2 -U__SSE__");
+        assert_eq!(windows_x64, "-O2");
+        assert_eq!(linux_arm, "-O2");
     }
 }

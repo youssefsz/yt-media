@@ -62,7 +62,9 @@ hands FFmpeg explicit local files.
 
 Windows ARM64 configures x264 with `--disable-asm` because CLANGARM64's COFF assembler cannot pass
 x264's GNU AArch64 assembly probe. The portable C implementation remains enabled and the workflow
-still requires FFmpeg to expose the `libx264` encoder before it can stage an artifact.
+also undefines Clang's x86-compatibility `__SSE__` macro for that x264 build so the upstream source
+does not select an x86-only vector branch on AArch64. The workflow still requires FFmpeg to expose
+the `libx264` encoder before it can stage an artifact.
 
 Expected native output names are `ffmpeg.exe` and `ffprobe.exe` on Windows, and `ffmpeg` and
 `ffprobe` elsewhere. A successful build records them as `bin/<name>` in

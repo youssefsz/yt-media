@@ -1,7 +1,7 @@
 ---
 id: '01'
 title: Toolchain and engine foundations
-status: blocked
+status: in-progress
 depends_on: []
 unlocks:
   - '02'
@@ -130,6 +130,9 @@ analysis or downloads.
 - Build x264 without assembly only on Windows ARM64. CLANGARM64's COFF assembler cannot satisfy
   x264's GNU AArch64 assembly probe, while the portable C implementation still supplies the
   required libx264 H.264 encoder and remains subject to the same capability probe.
+- Undefine Clang's x86-compatibility `__SSE__` macro only while compiling x264's portable
+  Windows ARM64 implementation. Upstream x264 otherwise selects an x86-only vector branch whose
+  `v4si` type is unavailable on AArch64; all other targets retain their upstream compiler macros.
 - Retry only transient artifact-download failures (`408`, `429`, transport timeouts/connect
   failures, and `5xx`) with a bounded three-attempt budget. Digest and exact-size checks remain
   mandatory after every successful response.
@@ -167,15 +170,9 @@ analysis or downloads.
     `ffmpeg-build-receipt.v1.json` does not exist. The ambient `8.0.1-full_build-www.gyan.dev`
     FFmpeg/FFprobe installation was inspected but never copied, recorded, verified, or substituted.
 
-## Explicit Blocker
+## Resumption Evidence
 
-Plan 01 cannot satisfy “a clean machine can build, verify, probe, and stage one target” or “the
-six-target sidecar workflow passes” without native FFmpeg/FFprobe outputs and receipts. Resolving
-this requires:
-
-1. a supported local MSYS2 environment to prove at least the Windows x64 path; and
-2. permission to push these commits and manually dispatch the committed workflow so all six native
-   jobs can be reviewed and their private artifact identifiers recorded.
-
-Until both acceptance checks pass, keep this plan in `plans/active/`, keep `completed_at` null, do
-not create `docs(plans): complete plan 01`, and do not unlock or begin Plan 02.
+The former publication and native-runner blocker was removed on 2026-07-28 when the user
+authorized publishing the repository and running its private workflow artifacts. Plan 01 resumed
+to address failures found by the six-target validation run; it remains active until every target
+passes.

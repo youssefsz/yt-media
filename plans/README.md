@@ -32,7 +32,7 @@ state first.
 
 | ID  | Milestone                                        | Status        | Depends on | Plan                                                   |
 | --- | ------------------------------------------------ | ------------- | ---------- | ------------------------------------------------------ |
-| 01  | Toolchain and engine foundations                 | `in-progress` | —          | [Plan 01](active/01-toolchain-engine-foundations.md)   |
+| 01  | Toolchain and engine foundations                 | `blocked`     | —          | [Plan 01](active/01-toolchain-engine-foundations.md)   |
 | 02  | Analysis engine and CLI slice                    | `blocked`     | 01         | [Plan 02](backlog/02-analysis-cli-slice.md)            |
 | 03  | Download and conversion CLI slice                | `blocked`     | 02         | [Plan 03](backlog/03-download-conversion-cli-slice.md) |
 | 04  | Persistent jobs, recovery, and history           | `blocked`     | 03         | [Plan 04](backlog/04-persistent-jobs-recovery.md)      |

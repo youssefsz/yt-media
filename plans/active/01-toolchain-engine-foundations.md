@@ -1,13 +1,16 @@
 ---
 id: '01'
 title: Toolchain and engine foundations
-status: in-progress
+status: blocked
 depends_on: []
 unlocks:
   - '02'
 started_at: '2026-07-28T15:49:13Z'
 completed_at: null
-implementation_commits: []
+implementation_commits:
+  - b54e7db
+  - aaca747
+  - 12c704e
 ---
 
 # Plan 01: Toolchain and Engine Foundations
@@ -125,9 +128,45 @@ analysis or downloads.
 
 ## Completion Evidence
 
-Populate during closeout:
-
-- Completed at:
+- Completed at: not completed; blocked on native artifact verification.
 - Implementation commits:
-- Sidecar workflow run/artifacts:
+  - `b54e7db` — safe asynchronous process boundary, target/tool contracts, manifest and receipt
+    validation, verified resolution, and process-tree tests.
+  - `aaca747` — six-target inventory, secure archive handling, `xtask` sidecar automation, and the
+    manually dispatched native workflow.
+  - `12c704e` — architecture decision, contributor guidance, and sidecar inventory/runbook.
+- Sidecar workflow run/artifacts: not run and no artifacts published. The new workflow exists only
+  in local commits; running it on the six GitHub-hosted operating-system/architecture runners
+  requires those commits to be pushed, which this task explicitly forbids.
 - Verification commands and results:
+  - `pnpm format:check`, `pnpm lint`, `pnpm check`, `pnpm test`, and `pnpm build` passed on
+    2026-07-28.
+  - `cargo test --workspace --all-features` passed 17 engine unit tests, 10 process integration
+    tests, 10 `xtask` archive/checksum/EJS tests, and the committed-manifest contract test.
+  - `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+    .github/workflows/sidecars.yml` passed.
+  - `cargo xtask sidecars fetch --target <triple>` completed for all six target triples, including
+    download and post-extraction digest verification.
+  - The cached Windows x64 yt-dlp and Deno assets reported exact versions `2026.06.09` and `2.8.1`;
+    Deno executed the restricted JavaScript probe and yt-dlp accepted the exact paired runtime path.
+  - `git ls-files` found no external executable, sidecar cache, or staged binary.
+  - `cargo xtask sidecars build --target x86_64-pc-windows-msvc` cannot run on this machine's
+    audited native build path: `native build program 'bash' is not available on PATH`. The machine
+    has no MSYS2 installation, `nasm`, or `pkg-config`; its `C:\Windows\System32\bash.exe` is a WSL
+    launcher that does not provide the required environment.
+  - `cargo xtask sidecars verify --target x86_64-pc-windows-msvc` correctly fails closed because
+    `ffmpeg-build-receipt.v1.json` does not exist. The ambient `8.0.1-full_build-www.gyan.dev`
+    FFmpeg/FFprobe installation was inspected but never copied, recorded, verified, or substituted.
+
+## Explicit Blocker
+
+Plan 01 cannot satisfy “a clean machine can build, verify, probe, and stage one target” or “the
+six-target sidecar workflow passes” without native FFmpeg/FFprobe outputs and receipts. Resolving
+this requires:
+
+1. a supported local MSYS2 environment to prove at least the Windows x64 path; and
+2. permission to push these commits and manually dispatch the committed workflow so all six native
+   jobs can be reviewed and their private artifact identifiers recorded.
+
+Until both acceptance checks pass, keep this plan in `plans/active/`, keep `completed_at` null, do
+not create `docs(plans): complete plan 01`, and do not unlock or begin Plan 02.

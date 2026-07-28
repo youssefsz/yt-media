@@ -31,7 +31,8 @@ impl CancellationToken {
         Self(self.0.child_token())
     }
 
-    pub(crate) async fn cancelled(&self) {
+    /// Waits until cancellation is requested.
+    pub async fn cancelled(&self) {
         self.0.cancelled().await;
     }
 }

@@ -62,6 +62,31 @@ MP3 bitrate choices and MP4 source selection are engine policy. MP4 choices pres
 heights without upscaling, prefer H.264 and AAC/M4A, retain selected source IDs, and classify future
 merge/transcode work. The CLI does not interpret raw formats or reproduce that policy.
 
+### Download and publication boundary
+
+The download path is:
+
+```text
+CLI format, quality, destination, and optional name
+  -> typed engine DownloadRequest
+  -> immediate bounded re-analysis and normalized format resolution
+  -> engine-owned yt-dlp source downloads and machine progress
+  -> engine-owned FFmpeg merge or compatibility conversion
+  -> final bounded FFprobe validation
+  -> exclusive reservation and no-clobber publication
+  -> typed DownloadResult or DownloadError
+```
+
+The engine returns a bounded non-blocking job event stream, a separate completion handle, and
+explicit pause/cancel controls. A slow UI cannot block subprocess pipe drainage. Pause preserves
+only documented yt-dlp resumable partials; cancel and post-download failures remove all owned
+temporary output. Every tool path remains explicit and every argument is passed without a shell.
+
+Portable filename sanitization, extension ownership, deterministic ` (N)` collision suffixes,
+same-directory temporary paths, final media policy, and publication are engine rules. A hidden
+exclusive reservation coordinates concurrent jobs. Verified output is published through a
+no-clobber hard link, so a file created during a race is never replaced.
+
 ## Application Responsibilities
 
 The CLI translates arguments and signals into engine requests, renders progress, and maps outcomes

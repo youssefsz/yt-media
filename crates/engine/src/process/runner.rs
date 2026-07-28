@@ -43,6 +43,24 @@ pub trait ProcessRunner: Send + Sync {
         spec: ProcessSpec,
         cancellation: CancellationToken,
     ) -> Result<ProcessOutput, ProcessError>;
+
+    /// Runs a process while best-effort forwarding bounded output chunks.
+    ///
+    /// The observer is deliberately non-blocking: a full or closed channel never delays pipe
+    /// drainage. Callers must use the returned capture as the authoritative complete bounded
+    /// output.
+    async fn run_streaming(
+        &self,
+        spec: ProcessSpec,
+        cancellation: CancellationToken,
+        observer: mpsc::Sender<ProcessEvent>,
+    ) -> Result<ProcessOutput, ProcessError> {
+        let output = self.run(spec, cancellation).await?;
+        for event in &output.capture.events {
+            let _ignored = observer.try_send(event.clone());
+        }
+        Ok(output)
+    }
 }
 
 /// Tokio-backed process runner with one owned process group per invocation.
@@ -57,7 +75,20 @@ impl ProcessRunner for TokioProcessRunner {
         cancellation: CancellationToken,
     ) -> Result<ProcessOutput, ProcessError> {
         let (owner_guard, abandoned) = oneshot::channel();
-        let task = tokio::spawn(run_owned(spec, cancellation, abandoned));
+        let task = tokio::spawn(run_owned(spec, cancellation, abandoned, None));
+        let result = task.await.map_err(ProcessError::OwnerTask)?;
+        drop(owner_guard);
+        result
+    }
+
+    async fn run_streaming(
+        &self,
+        spec: ProcessSpec,
+        cancellation: CancellationToken,
+        observer: mpsc::Sender<ProcessEvent>,
+    ) -> Result<ProcessOutput, ProcessError> {
+        let (owner_guard, abandoned) = oneshot::channel();
+        let task = tokio::spawn(run_owned(spec, cancellation, abandoned, Some(observer)));
         let result = task.await.map_err(ProcessError::OwnerTask)?;
         drop(owner_guard);
         result
@@ -68,6 +99,7 @@ async fn run_owned(
     mut spec: ProcessSpec,
     cancellation: CancellationToken,
     mut abandoned: oneshot::Receiver<()>,
+    observer: Option<mpsc::Sender<ProcessEvent>>,
 ) -> Result<ProcessOutput, ProcessError> {
     let mut process = spawn_owned_process(&mut spec).await?;
     let deadline = spec.timeout.map(|timeout| Instant::now() + timeout);
@@ -90,7 +122,7 @@ async fn run_owned(
             biased;
             () = cancellation.cancelled(), if exit_status.is_none() => {
                 terminate_and_reap(&mut process.child).await?;
-                drain_messages(&mut process.pipe_receiver, &mut collector, &mut readers_open, &mut reader_failure).await;
+                drain_messages(&mut process.pipe_receiver, &mut collector, &mut readers_open, &mut reader_failure, observer.as_ref()).await;
                 await_io_tasks(process.stdout_task, process.stderr_task, process.stdin_task).await?;
                 return Err(ProcessError::Cancelled {
                     output: collector.finish(),
@@ -99,14 +131,14 @@ async fn run_owned(
             result = &mut abandoned, if exit_status.is_none() => {
                 if result.is_err() {
                     terminate_and_reap(&mut process.child).await?;
-                    drain_messages(&mut process.pipe_receiver, &mut collector, &mut readers_open, &mut reader_failure).await;
+                    drain_messages(&mut process.pipe_receiver, &mut collector, &mut readers_open, &mut reader_failure, observer.as_ref()).await;
                     await_io_tasks(process.stdout_task, process.stderr_task, process.stdin_task).await?;
                     return Err(ProcessError::Abandoned);
                 }
             }
             () = sleep_until_optional(deadline), if exit_status.is_none() && deadline.is_some() => {
                 terminate_and_reap(&mut process.child).await?;
-                drain_messages(&mut process.pipe_receiver, &mut collector, &mut readers_open, &mut reader_failure).await;
+                drain_messages(&mut process.pipe_receiver, &mut collector, &mut readers_open, &mut reader_failure, observer.as_ref()).await;
                 await_io_tasks(process.stdout_task, process.stderr_task, process.stdin_task).await?;
                 return Err(ProcessError::TimedOut {
                     timeout: spec.timeout.unwrap_or_default(),
@@ -114,7 +146,7 @@ async fn run_owned(
                 });
             }
             message = process.pipe_receiver.recv(), if readers_open > 0 => {
-                apply_reader_message(message, &mut collector, &mut readers_open, &mut reader_failure);
+                apply_reader_message(message, &mut collector, &mut readers_open, &mut reader_failure, observer.as_ref());
             }
             _ = poll.tick(), if exit_status.is_none() => {}
         }
@@ -268,10 +300,11 @@ async fn drain_messages(
     collector: &mut OutputCollector,
     readers_open: &mut u8,
     reader_failure: &mut Option<(OutputStream, io::Error)>,
+    observer: Option<&mpsc::Sender<ProcessEvent>>,
 ) {
     while *readers_open > 0 {
         let message = receiver.recv().await;
-        apply_reader_message(message, collector, readers_open, reader_failure);
+        apply_reader_message(message, collector, readers_open, reader_failure, observer);
     }
 }
 
@@ -280,9 +313,16 @@ fn apply_reader_message(
     collector: &mut OutputCollector,
     readers_open: &mut u8,
     reader_failure: &mut Option<(OutputStream, io::Error)>,
+    observer: Option<&mpsc::Sender<ProcessEvent>>,
 ) {
     match message {
-        Some(ReaderMessage::Bytes(stream, bytes)) => collector.push(stream, &bytes),
+        Some(ReaderMessage::Bytes(stream, bytes)) => {
+            if let Some(event) = collector.push(stream, &bytes)
+                && let Some(observer) = observer
+            {
+                let _ignored = observer.try_send(event);
+            }
+        }
         Some(ReaderMessage::Closed(_stream)) => {
             *readers_open = readers_open.saturating_sub(1);
         }
@@ -335,18 +375,22 @@ impl OutputCollector {
         }
     }
 
-    fn push(&mut self, stream: OutputStream, bytes: &[u8]) {
+    fn push(&mut self, stream: OutputStream, bytes: &[u8]) -> Option<ProcessEvent> {
         let retained = match stream {
             OutputStream::Stdout => self.stdout.push(bytes),
             OutputStream::Stderr => self.stderr.push(bytes),
         };
-        if !retained.is_empty() {
-            self.events.push(ProcessEvent {
+        if retained.is_empty() {
+            None
+        } else {
+            let event = ProcessEvent {
                 sequence: self.next_sequence,
                 stream,
                 bytes: retained,
-            });
+            };
+            self.events.push(event.clone());
             self.next_sequence = self.next_sequence.saturating_add(1);
+            Some(event)
         }
     }
 

@@ -84,7 +84,22 @@ and compatibility transcoding.
 
 ## Decisions and Deviations
 
-Record any accepted deviation here before code depends on it.
+- Model pause as a controlled, fully reaped stop that preserves only yt-dlp-owned resumable
+  partials. Plan 03 does not add persistence or automatic restart; callers resume by starting the
+  same request again, while Plan 04 owns durable recovery.
+- Publish job events through a bounded broadcast stream so a slow or abandoned renderer cannot
+  block subprocess pipe drainage. Stage changes and completion remain authoritative through the
+  separate completion handle; lagging event consumers receive the stream's explicit lag signal.
+- Reserve candidate names with exclusive hidden lock files and publish a verified same-directory
+  temporary through a no-clobber hard link followed by temporary cleanup. This gives deterministic
+  collision handling without exposing an empty false final file or using platform-specific unsafe
+  rename APIs.
+- Treat yt-dlp progress templates and FFmpeg `-progress pipe:1` as private bounded line protocols.
+  Progress updates may be coalesced when the event buffer is full, but stage transitions and the
+  final typed result are never inferred from presentation-layer state.
+- Keep generated media fixtures runtime-only and gate tests that require the pinned real FFmpeg
+  toolchain behind an explicit environment variable. Routine engine and CLI contract tests use
+  compiled fixture executables and never contact third-party media.
 
 ## Completion Evidence
 

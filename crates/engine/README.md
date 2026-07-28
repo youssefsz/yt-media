@@ -19,6 +19,11 @@ Its current foundation provides:
   `FFmpeg` paths;
 - normalized bounded media metadata, source descriptors, MP3 bitrate choices, descending MP4
   source heights, and explicit compatibility work.
+- typed download jobs with non-blocking events, authoritative completion, and pause/cancel controls;
+- machine-readable yt-dlp and `FFmpeg` progress, MP3 encoding, MP4 merge/transcode policy, and
+  bounded final `FFprobe` verification;
+- portable output naming, deterministic collision reservations, partial ownership, cleanup, and
+  no-clobber publication.
 
-Downloads, conversion, queueing, persistence, and presentation remain outside this crate's current
-implemented slice.
+Queueing, persistence, recovery, and presentation remain outside this crate's current implemented
+slice.

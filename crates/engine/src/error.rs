@@ -2,6 +2,7 @@
 
 pub use crate::{
     analysis::{AnalysisDataError, AnalysisToolError, AnalyzeError, MediaUrlError},
+    download::{DownloadError, DownloadRequestError, DownloadToolError},
     manifest::ManifestError,
     path::PathValidationError,
     process::ProcessError,

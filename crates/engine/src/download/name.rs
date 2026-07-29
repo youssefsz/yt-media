@@ -86,6 +86,10 @@ impl OutputReservation {
         &self.final_path
     }
 
+    pub(crate) fn lock_path(&self) -> &Path {
+        &self.lock_path
+    }
+
     pub(crate) fn publish(self, temporary: &Path) -> Result<PathBuf, DownloadError> {
         fs::hard_link(temporary, &self.final_path).map_err(|source| DownloadError::Filesystem {
             operation: "publish-no-clobber",

@@ -9,14 +9,15 @@ use std::{
     },
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::{broadcast, oneshot};
+use uuid::Uuid;
 
 use crate::{analysis::MediaUrl, cancellation::CancellationToken};
 
 /// A supported constant MP3 bitrate.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct AudioQuality(u16);
 
@@ -41,7 +42,7 @@ impl TryFrom<u16> for AudioQuality {
 }
 
 /// A requested source-height MP4 choice.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct VideoQuality(u32);
 
@@ -66,7 +67,7 @@ impl TryFrom<u32> for VideoQuality {
 }
 
 /// The desired output and normalized quality.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "format", content = "quality", rename_all = "lowercase")]
 pub enum OutputSelection {
     /// Constant-bitrate MP3 audio.
@@ -191,11 +192,33 @@ pub enum DownloadRequestError {
 }
 
 /// One process-local job identity suitable for paths and event correlation.
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct JobId(pub(crate) String);
 
 impl JobId {
+    /// Creates a time-ordered `UUIDv7` job identity.
+    #[must_use]
+    pub fn new_v7() -> Self {
+        Self(Uuid::now_v7().to_string())
+    }
+
+    /// Parses and validates a persisted `UUIDv7` job identity.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for malformed UUIDs and UUID versions other than seven.
+    pub fn parse(value: &str) -> Result<Self, JobIdError> {
+        let parsed = Uuid::parse_str(value).map_err(|source| JobIdError::Malformed {
+            value: value.chars().take(64).collect(),
+            source,
+        })?;
+        if parsed.get_version_num() != 7 {
+            return Err(JobIdError::WrongVersion(parsed.get_version_num()));
+        }
+        Ok(Self(parsed.hyphenated().to_string()))
+    }
+
     /// Returns the bounded printable identity.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -209,8 +232,25 @@ impl fmt::Display for JobId {
     }
 }
 
+/// A malformed or non-v7 persisted job identity.
+#[derive(Debug, Error)]
+pub enum JobIdError {
+    /// UUID syntax was malformed.
+    #[error("job ID `{value}` is not a valid UUID")]
+    Malformed {
+        /// Bounded rejected value.
+        value: String,
+        /// UUID parser failure.
+        #[source]
+        source: uuid::Error,
+    },
+    /// UUID syntax was valid, but its version was not seven.
+    #[error("job ID must be UUIDv7, found UUID version {0}")]
+    WrongVersion(usize),
+}
+
 /// Authoritative engine lifecycle stages.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum JobStage {
     /// Re-analyzing immediately before source selection.
@@ -234,7 +274,7 @@ pub enum JobStage {
 }
 
 /// Bounded progress at the current stage.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct JobProgress {
     /// Current stage.
     pub stage: JobStage,

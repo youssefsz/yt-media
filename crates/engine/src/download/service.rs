@@ -9,10 +9,10 @@ use std::{
         Arc,
         atomic::{AtomicU8, AtomicU64, Ordering},
     },
-    time::{Duration as StdDuration, SystemTime, UNIX_EPOCH},
+    time::Duration as StdDuration,
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -47,13 +47,11 @@ const PROCESS_MAX_LINES: usize = 20_000;
 const MAX_DIAGNOSTIC_CHARS: usize = 4_096;
 const MAX_WARNING_LINES: usize = 32;
 const MAX_WARNING_CHARS: usize = 512;
-const OWNER_MARKER: &[u8] = b"yt-media-partial-owner-v1\n";
+const OWNER_MANIFEST_VERSION: u32 = 1;
 const DOWNLOAD_TIMEOUT: StdDuration = StdDuration::from_hours(24);
 const FFMPEG_TIMEOUT: StdDuration = StdDuration::from_hours(24);
 const FFPROBE_TIMEOUT: StdDuration = StdDuration::from_mins(2);
 const YTDLP_PROGRESS_TEMPLATE: &str = "download:yt-media-progress|%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s";
-
-static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 
 /// Explicit verified tools required by download and final validation.
 #[derive(Clone, Debug)]
@@ -183,7 +181,10 @@ impl DownloadService {
     /// Starts one download and immediately returns events, completion, and controls.
     #[must_use]
     pub fn start(&self, request: DownloadRequest) -> StartedDownload {
-        let job_id = new_job_id();
+        self.start_with_id(request, JobId::new_v7())
+    }
+
+    pub(crate) fn start_with_id(&self, request: DownloadRequest, job_id: JobId) -> StartedDownload {
         let cancellation = CancellationToken::new();
         let state = Arc::new(AtomicU8::new(CONTROL_RUNNING));
         let controls = JobControls {
@@ -246,8 +247,14 @@ impl DownloadService {
         let stem = sanitize_output_stem(stripped);
         let extension = request.output.extension();
         let reservation = reserve_async(destination.clone(), stem, extension.to_owned()).await?;
-        let mut workspace =
-            Workspace::new(destination, reservation.path(), &selected, request.output)?;
+        let mut workspace = Workspace::new(
+            destination,
+            reservation.path(),
+            reservation.lock_path(),
+            &selected,
+            request.output,
+            &job_id,
+        )?;
 
         self.download_sources(
             &request,
@@ -596,14 +603,6 @@ impl DownloadService {
     }
 }
 
-fn new_job_id() -> JobId {
-    let counter = NEXT_JOB.fetch_add(1, Ordering::Relaxed);
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos());
-    JobId(format!("{:x}-{:x}-{counter:x}", std::process::id(), nanos))
-}
-
 #[derive(Clone)]
 struct EventEmitter {
     job_id: JobId,
@@ -890,6 +889,208 @@ fn source_extension(source: &SourceFormat) -> String {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct OwnerManifest {
+    version: u32,
+    job_id: String,
+    final_name: String,
+    exact_paths: Vec<PathBuf>,
+    source_paths: Vec<PathBuf>,
+}
+
+fn owner_manifest_path(directory: &Path, job_id: &JobId) -> PathBuf {
+    directory.join(format!(".yt-media-{}.owner.json", job_id.as_str()))
+}
+
+fn safe_format_component(value: &str) -> String {
+    let token = value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        .take(32)
+        .collect::<String>();
+    if token.is_empty() {
+        "format".to_owned()
+    } else {
+        token
+    }
+}
+
+fn write_owner_manifest(path: &Path, manifest: &OwnerManifest) -> Result<(), DownloadError> {
+    let bytes = serde_json::to_vec(manifest).map_err(|error| DownloadError::Protocol {
+        protocol: "partial-owner-manifest",
+        reason: format!("could not serialize ownership data: {error}"),
+    })?;
+    let mut owner = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|source| DownloadError::Filesystem {
+            operation: "claim-workspace-owner",
+            path: bounded_path(path),
+            source,
+        })?;
+    if let Err(source) = owner.write_all(&bytes).and_then(|()| owner.sync_all()) {
+        drop(owner);
+        let _ignored = fs::remove_file(path);
+        return Err(DownloadError::Filesystem {
+            operation: "write-workspace-owner",
+            path: bounded_path(path),
+            source,
+        });
+    }
+    Ok(())
+}
+
+fn read_owner_manifest(path: &Path, job_id: &JobId) -> Result<OwnerManifest, DownloadError> {
+    let metadata = fs::metadata(path).map_err(|source| DownloadError::Filesystem {
+        operation: "read-workspace-owner-metadata",
+        path: bounded_path(path),
+        source,
+    })?;
+    if metadata.len() > 64 * 1024 {
+        return Err(workspace_conflict(path));
+    }
+    let bytes = fs::read(path).map_err(|source| DownloadError::Filesystem {
+        operation: "read-workspace-owner",
+        path: bounded_path(path),
+        source,
+    })?;
+    let manifest =
+        serde_json::from_slice::<OwnerManifest>(&bytes).map_err(|_| workspace_conflict(path))?;
+    if manifest.version != OWNER_MANIFEST_VERSION
+        || manifest.job_id != job_id.as_str()
+        || manifest.final_name.chars().count() > 255
+        || manifest.exact_paths.len() > 8
+        || manifest.source_paths.len() > 2
+    {
+        return Err(workspace_conflict(path));
+    }
+    let Some(directory) = path.parent() else {
+        return Err(workspace_conflict(path));
+    };
+    if manifest
+        .exact_paths
+        .iter()
+        .chain(&manifest.source_paths)
+        .any(|owned| owned.parent() != Some(directory))
+    {
+        return Err(workspace_conflict(path));
+    }
+    Ok(manifest)
+}
+
+fn discover_manifest_paths(
+    directory: &Path,
+    owner_path: &Path,
+    manifest: &OwnerManifest,
+) -> Result<Vec<PathBuf>, DownloadError> {
+    let mut paths = Vec::new();
+    if owner_path.is_file() {
+        paths.push(owner_path.to_path_buf());
+    }
+    paths.extend(
+        manifest
+            .exact_paths
+            .iter()
+            .filter(|path| path.is_file())
+            .cloned(),
+    );
+    let entries = fs::read_dir(directory).map_err(|source| DownloadError::Filesystem {
+        operation: "discover-owned-partials",
+        path: bounded_path(directory),
+        source,
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| DownloadError::Filesystem {
+            operation: "read-owned-partial-entry",
+            path: bounded_path(directory),
+            source,
+        })?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if manifest.source_paths.iter().any(|source| {
+            source
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|source_name| {
+                    name.starts_with(&format!("{source_name}.part"))
+                        || name == format!("{source_name}.ytdl")
+                })
+        }) {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
+fn remove_manifest_paths(
+    directory: &Path,
+    owner_path: &Path,
+    manifest: &OwnerManifest,
+) -> Result<(), DownloadError> {
+    let paths = discover_manifest_paths(directory, owner_path, manifest)?;
+    for path in paths.iter().filter(|path| path.as_path() != owner_path) {
+        remove_exact_if_exists(path)?;
+    }
+    remove_exact_if_exists(owner_path)
+}
+
+pub(crate) fn reconcile_owned_paths(
+    directory: &Path,
+    job_id: &JobId,
+    retain_resumable_only: bool,
+) -> Result<Vec<PathBuf>, DownloadError> {
+    if !directory.is_dir() {
+        return Ok(Vec::new());
+    }
+    let owner_path = owner_manifest_path(directory, job_id);
+    if !owner_path.is_file() {
+        return Ok(Vec::new());
+    }
+    let manifest = read_owner_manifest(&owner_path, job_id)?;
+    let discovered = discover_manifest_paths(directory, &owner_path, &manifest)?;
+    if !retain_resumable_only {
+        return Ok(discovered);
+    }
+    for path in &manifest.exact_paths {
+        remove_exact_if_exists(path)?;
+    }
+    discover_manifest_paths(directory, &owner_path, &manifest)
+}
+
+pub(crate) fn remove_recorded_owned_paths(
+    directory: &Path,
+    job_id: &JobId,
+    recorded: &[PathBuf],
+) -> Result<(), DownloadError> {
+    if recorded.is_empty() {
+        return Ok(());
+    }
+    let owner_path = owner_manifest_path(directory, job_id);
+    let manifest = read_owner_manifest(&owner_path, job_id)?;
+    let discovered = discover_manifest_paths(directory, &owner_path, &manifest)?;
+    if recorded
+        .iter()
+        .any(|path| !discovered.iter().any(|owned| owned == path))
+    {
+        return Err(workspace_conflict(&owner_path));
+    }
+    for path in recorded.iter().filter(|path| path.as_path() != owner_path) {
+        remove_exact_if_exists(path)?;
+    }
+    if recorded.iter().any(|path| path == &owner_path) {
+        remove_exact_if_exists(&owner_path)?;
+    }
+    Ok(())
+}
+
 struct Workspace {
     directory: PathBuf,
     owner_path: PathBuf,
@@ -903,8 +1104,10 @@ impl Workspace {
     fn new(
         directory: PathBuf,
         final_path: &Path,
+        reservation_path: &Path,
         selected: &FormatOption,
         output: OutputSelection,
+        job_id: &JobId,
     ) -> Result<Self, DownloadError> {
         let final_name = final_path
             .file_name()
@@ -931,18 +1134,29 @@ impl Workspace {
             .enumerate()
             .map(|(index, source)| {
                 directory.join(format!(
-                    ".{final_name}.yt-media-source-{}.{}",
+                    ".yt-media-{}.source-{}-{}.{}",
+                    job_id.as_str(),
                     index + 1,
+                    safe_format_component(source.format_id.as_str()),
                     source_extension(source)
                 ))
             })
             .collect::<Vec<_>>();
         let work_path = directory.join(format!(
-            ".{final_name}.yt-media-work.{}",
+            ".yt-media-{}.work.{}",
+            job_id.as_str(),
             output.extension()
         ));
-        let owner_path = directory.join(format!(".{final_name}.yt-media-owner"));
-        claim_workspace(&directory, &owner_path, &source_paths, &work_path)?;
+        let owner_path = owner_manifest_path(&directory, job_id);
+        claim_workspace(
+            &directory,
+            &owner_path,
+            &source_paths,
+            &work_path,
+            reservation_path,
+            job_id,
+            final_name,
+        )?;
         remove_exact_if_exists(&work_path)?;
         for path in &source_paths {
             if path.is_file() {
@@ -1033,48 +1247,33 @@ fn claim_workspace(
     owner_path: &Path,
     source_paths: &[PathBuf],
     work_path: &Path,
+    reservation_path: &Path,
+    job_id: &JobId,
+    final_name: &str,
 ) -> Result<(), DownloadError> {
+    let manifest = OwnerManifest {
+        version: OWNER_MANIFEST_VERSION,
+        job_id: job_id.as_str().to_owned(),
+        final_name: final_name.to_owned(),
+        exact_paths: source_paths
+            .iter()
+            .cloned()
+            .chain([work_path.to_path_buf(), reservation_path.to_path_buf()])
+            .collect(),
+        source_paths: source_paths.to_vec(),
+    };
     if owner_path.exists() {
-        let metadata = fs::metadata(owner_path).map_err(|source| DownloadError::Filesystem {
-            operation: "read-workspace-owner-metadata",
-            path: bounded_path(owner_path),
-            source,
-        })?;
-        if metadata.len() != u64::try_from(OWNER_MARKER.len()).unwrap_or(u64::MAX) {
-            return Err(workspace_conflict(owner_path));
-        }
-        let marker = fs::read(owner_path).map_err(|source| DownloadError::Filesystem {
-            operation: "read-workspace-owner",
-            path: bounded_path(owner_path),
-            source,
-        })?;
-        if marker != OWNER_MARKER {
-            return Err(workspace_conflict(owner_path));
+        let existing = read_owner_manifest(owner_path, job_id)?;
+        if existing != manifest {
+            remove_manifest_paths(directory, owner_path, &existing)?;
+            write_owner_manifest(owner_path, &manifest)?;
         }
         return Ok(());
     }
     if workspace_paths_exist(directory, source_paths, work_path)? {
         return Err(workspace_conflict(owner_path));
     }
-    let mut owner = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(owner_path)
-        .map_err(|source| DownloadError::Filesystem {
-            operation: "claim-workspace-owner",
-            path: bounded_path(owner_path),
-            source,
-        })?;
-    if let Err(source) = owner.write_all(OWNER_MARKER) {
-        drop(owner);
-        let _ignored = fs::remove_file(owner_path);
-        return Err(DownloadError::Filesystem {
-            operation: "write-workspace-owner",
-            path: bounded_path(owner_path),
-            source,
-        });
-    }
-    Ok(())
+    write_owner_manifest(owner_path, &manifest)
 }
 
 fn workspace_paths_exist(

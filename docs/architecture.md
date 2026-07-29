@@ -87,6 +87,36 @@ same-directory temporary paths, final media policy, and publication are engine r
 exclusive reservation coordinates concurrent jobs. Verified output is published through a
 no-clobber hard link, so a file created during a race is never replaced.
 
+### Persistent queue boundary
+
+The durable path is:
+
+```text
+CLI or future desktop intent
+  -> engine JobQueue validation and UUIDv7 identity
+  -> exclusively locked, migrated bundled SQLite database
+  -> durable FIFO claim under the configured one-to-four slot bound
+  -> existing DownloadService orchestration for the complete attempt
+  -> persisted progress, classified terminal result, and final output metadata
+```
+
+Database and ownership filesystem work crosses blocking task boundaries. Queue construction holds
+one sibling file lock for the writable database lifetime, enables SQLite WAL and foreign keys,
+checks integrity, and runs atomic forward-only numbered migrations. A future-version, locked, or
+corrupt database produces an actionable typed error and is not silently recreated.
+
+Opening the queue never starts its scheduler. Process-active records are transactionally converted
+to `interrupted`, destinations are checked, and job-specific owner manifests are reconciled.
+Enqueue, resume, or retry is the explicit act that permits scheduling. One concurrency bound covers
+download and post-processing because each claimed job owns its slot until it reaches a stopped or
+terminal state.
+
+Pause and shutdown terminate and reap owned process trees before retaining resumable paths. Cancel
+deletes only exact paths recorded from a validated owner manifest. Retry appends to durable FIFO
+order and reuses the fresh Plan 03 analysis path, so a disappeared normalized selection fails as
+`format-unavailable`. Completed records remain until explicit history deletion; final output
+presence is derived without deleting history.
+
 ## Application Responsibilities
 
 The CLI translates arguments and signals into engine requests, renders progress, and maps outcomes

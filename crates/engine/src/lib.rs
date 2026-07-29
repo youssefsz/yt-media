@@ -5,6 +5,7 @@ pub mod analysis;
 pub mod cancellation;
 pub mod download;
 pub mod error;
+pub mod jobs;
 pub mod manifest;
 pub mod path;
 pub mod process;

@@ -24,6 +24,13 @@ Its current foundation provides:
   bounded final `FFprobe` verification;
 - portable output naming, deterministic collision reservations, partial ownership, cleanup, and
   no-clobber publication.
+- `UUIDv7` durable job identities and a validated queue state machine;
+- bundled `SQLite` storage with numbered atomic migrations, integrity reporting, an exclusive writer
+  lock, persisted normalized requests, settings, progress, classified failures, exact owned paths,
+  and durable final-output metadata;
+- passive startup recovery that marks active work interrupted without starting tools or network
+  activity;
+- FIFO scheduling with shared configurable concurrency, explicit pause/resume/cancel/retry,
+  bounded shutdown, retained resumable partials, and persistent missing-output-aware history.
 
-Queueing, persistence, recovery, and presentation remain outside this crate's current implemented
-slice.
+Presentation remains outside this crate.

@@ -306,7 +306,7 @@ async fn complete_mp3_job_uses_exact_machine_contracts_and_no_clobber_publicatio
     assert!(
         rendered[3]
             .last()
-            .is_some_and(|path| path.ends_with(".song (1).mp3.yt-media-work.mp3"))
+            .is_some_and(|path| path.contains(".yt-media-") && path.ends_with(".work.mp3"))
     );
     Ok(())
 }
@@ -363,11 +363,11 @@ async fn cancel_removes_owned_partials_and_pause_retains_only_resumable_partials
                     .extension()
                     .is_some_and(|extension| extension.eq_ignore_ascii_case("part"))
             }));
-            assert!(files.iter().any(|file| {
-                Path::new(file)
-                    .extension()
-                    .is_some_and(|extension| extension == "yt-media-owner")
-            }));
+            assert!(
+                files.iter().any(|file| {
+                    file.starts_with(".yt-media-") && file.ends_with(".owner.json")
+                })
+            );
         } else {
             assert!(files.is_empty());
         }

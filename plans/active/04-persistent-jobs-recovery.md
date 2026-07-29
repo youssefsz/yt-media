@@ -1,12 +1,12 @@
 ---
 id: '04'
 title: Persistent jobs, recovery, and history
-status: ready
+status: in-progress
 depends_on:
   - '03'
 unlocks:
   - '05'
-started_at: null
+started_at: '2026-07-29T00:10:19Z'
 completed_at: null
 implementation_commits: []
 ---

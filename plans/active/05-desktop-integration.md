@@ -1,12 +1,12 @@
 ---
 id: '05'
 title: Desktop integration and typed IPC
-status: ready
+status: in-progress
 depends_on:
   - '04'
 unlocks:
   - '06'
-started_at: null
+started_at: '2026-07-29T08:06:57Z'
 completed_at: null
 implementation_commits: []
 ---

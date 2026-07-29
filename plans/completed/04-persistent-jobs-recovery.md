@@ -1,14 +1,17 @@
 ---
 id: '04'
 title: Persistent jobs, recovery, and history
-status: in-progress
+status: completed
 depends_on:
   - '03'
 unlocks:
   - '05'
 started_at: '2026-07-29T00:10:19Z'
-completed_at: null
-implementation_commits: []
+completed_at: '2026-07-29T01:09:11Z'
+implementation_commits:
+  - 63a5a2b6bb0b7d1ddf5d1dcd548b9616a96b0099
+  - 6a35250ab24c74272f5c7878d18da67f128d1bc2
+  - 16ea8b2ddcd2fbffbe21d76c263398fe91f1b152
 ---
 
 # Plan 04: Persistent Jobs, Recovery, and History
@@ -76,10 +79,29 @@ resumes it.
 
 ## Decisions and Deviations
 
-Record any accepted deviation here before code depends on it.
+No material deviations were required.
 
 ## Completion Evidence
 
-- Completed at:
+- Completed at: `2026-07-29T01:09:11Z`
 - Implementation commits:
+  - `63a5a2b6bb0b7d1ddf5d1dcd548b9616a96b0099` (`feat(engine): add persistent job queue`)
+  - `6a35250ab24c74272f5c7878d18da67f128d1bc2` (`feat(cli): add persistent job commands`)
+  - `16ea8b2ddcd2fbffbe21d76c263398fe91f1b152` (`test(cli): isolate persistent stores`)
 - Verification commands and results:
+  - `pnpm format:check` passed.
+  - `pnpm lint` passed, including workspace Clippy with warnings denied.
+  - `pnpm check` passed with zero Svelte or TypeScript diagnostics.
+  - `pnpm test` passed the complete workspace suite, including deterministic queue, recovery,
+    migration, ownership, concurrency, property, and black-box CLI coverage.
+  - `pnpm build` passed.
+  - `cargo test --workspace --all-features` passed.
+  - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps` passed.
+  - `git diff --check` passed.
+  - `cargo test -p yt-media-cli --all-features --test analyze_cli -- --test-threads=9` passed five
+    consecutive repetitions after isolating each black-box process database.
+  - The optional Windows-hosted `x86_64-unknown-linux-gnu` cross-link attempt reached bundled SQLite
+    but could not link because the local machine has no GNU Linux cross-compiler. Native Linux
+    compilation and the full workspace suite passed in hosted CI.
+  - [GitHub Actions CI run 30412991470](https://github.com/youssefsz/yt-media/actions/runs/30412991470)
+    passed the Linux quality gates and native Rust checks on macOS 14 and Windows 2022.

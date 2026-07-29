@@ -1,7 +1,7 @@
 ---
 id: '05'
 title: Desktop integration and typed IPC
-status: blocked
+status: ready
 depends_on:
   - '04'
 unlocks:

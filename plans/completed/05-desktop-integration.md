@@ -1,14 +1,16 @@
 ---
 id: '05'
 title: Desktop integration and typed IPC
-status: in-progress
+status: completed
 depends_on:
   - '04'
 unlocks:
   - '06'
 started_at: '2026-07-29T08:06:57Z'
-completed_at: null
-implementation_commits: []
+completed_at: '2026-07-29T09:06:12Z'
+implementation_commits:
+  - 'dfc9e909ecc785f48c348c2985a86b2104668d96'
+  - '756291614c5d294695b1dc2a2d107728d8d656d8'
 ---
 
 # Plan 05: Desktop Integration and Typed IPC
@@ -73,10 +75,34 @@ milestone implements native lifecycle and command/event integration, not the pol
 
 ## Decisions and Deviations
 
-Record any accepted deviation here before code depends on it.
+No material deviations were required. The packaging-only Tauri resource overlay keeps ignored
+sidecar staging artifacts out of ordinary development checks while preserving the verified
+resource layout for desktop bundles.
 
 ## Completion Evidence
 
-- Completed at:
+- Completed at: `2026-07-29T09:06:12Z`
 - Implementation commits:
+  - `dfc9e909ecc785f48c348c2985a86b2104668d96` (`feat(desktop): add typed engine integration`)
+  - `756291614c5d294695b1dc2a2d107728d8d656d8`
+    (`test(desktop): expand native integration validation`)
 - Verification commands and results:
+  - `pnpm format:check` — passed.
+  - `pnpm lint` — ESLint and workspace Clippy passed with warnings denied.
+  - `pnpm check` — Svelte and TypeScript passed with zero errors and warnings.
+  - `pnpm test` — frontend behavior, generated IPC drift, all workspace unit tests, fixture command
+    integration, reconnect/recovery/persistence, capability, single-instance coordination, and
+    bounded-shutdown tests passed.
+  - `pnpm build` — production frontend build passed.
+  - `cargo test --workspace --all-features` — passed, including native fixture smoke and resolver
+    precedence/staged-inventory coverage.
+  - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps` — passed.
+  - `pnpm ipc:generate && pnpm ipc:check` — deterministic checked-in TypeScript DTO generation and
+    drift verification passed.
+  - `git diff --check` — passed.
+  - Native Windows Tauri smoke — launched the scaffold, recovered bootstrap state in degraded mode
+    without bundled fixture tools, rendered the safe diagnostic, and closed through bounded
+    shutdown. The content region was inspected at `960x640`, `1280x800`, and `1600x1000`.
+  - [GitHub Actions run 30437699683](https://github.com/youssefsz/yt-media/actions/runs/30437699683)
+    — quality gates and native Rust checks passed on Windows x64, Windows ARM64, macOS Intel, macOS
+    Apple Silicon, Linux x64, and Linux ARM64.

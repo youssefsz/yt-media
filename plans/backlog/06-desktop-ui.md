@@ -1,7 +1,7 @@
 ---
 id: '06'
 title: Desktop UI, accessibility, and motion
-status: blocked
+status: ready
 depends_on:
   - '05'
 unlocks:

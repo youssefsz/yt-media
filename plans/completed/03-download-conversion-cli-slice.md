@@ -1,14 +1,16 @@
 ---
 id: '03'
 title: Download and conversion CLI slice
-status: in-progress
+status: completed
 depends_on:
   - '02'
 unlocks:
   - '04'
 started_at: '2026-07-28T22:44:44Z'
-completed_at: null
-implementation_commits: []
+completed_at: '2026-07-29T00:05:52Z'
+implementation_commits:
+  - 'bfdeda20f685e3c0927677592d82a1098c013208'
+  - 'e4c238e1e595af6920b30595491c8d51fc277b29'
 ---
 
 # Plan 03: Download and Conversion CLI Slice
@@ -103,6 +105,45 @@ and compatibility transcoding.
 
 ## Completion Evidence
 
-- Completed at:
+- Completed at: `2026-07-29T00:05:52Z`.
 - Implementation commits:
-- Verification commands and results:
+  - `bfdeda2` — typed download job engine, format/conversion orchestration, bounded progress,
+    cancellation and pause behavior, safe naming and no-clobber publication, fixtures, and engine
+    tests.
+  - `e4c238e` — human and NDJSON CLI download surfaces, exit and signal behavior, black-box tests,
+    public contract documentation, architecture decision, and contributor documentation.
+- Local verification on commit `e4c238e`:
+  - `pnpm format:check`, `pnpm lint`, `pnpm check`, `pnpm test`, and `pnpm build` passed on
+    2026-07-28.
+  - `cargo test --workspace --all-features` passed 97 unit, contract, integration, compiled CLI,
+    `xtask`, and manifest tests plus all doctests.
+  - `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps` passed.
+  - Engine and CLI all-target, all-feature `cargo check` and Clippy passed for the
+    `x86_64-unknown-linux-gnu` target from Windows, in addition to the native Windows gates.
+  - The opt-in real-media integration test passed with installed FFmpeg and FFprobe 8.0.1,
+    covering MP3 metadata, H.264/AAC stream-copy merge, VP9/Opus to H.264/AAC transcode, duration,
+    `yuv420p`, no-upscale behavior, and non-empty output.
+  - `git diff --check` passed.
+- Hosted verification:
+  - [CI run `30408644171`](https://github.com/youssefsz/yt-media/actions/runs/30408644171)
+    passed Linux formatting, lint, TypeScript/Svelte checks, all tests, and frontend build, plus
+    native Rust workspace checks on Windows and macOS for `e4c238e`.
+  - [Sidecar run `30408943963`](https://github.com/youssefsz/yt-media/actions/runs/30408943963)
+    passed all six release targets. Every job fetched pinned inputs, built FFmpeg/FFprobe natively,
+    verified executable digests and versions, probed H.264, AAC, MP3, MP4, FFprobe, Deno, and
+    yt-dlp/Deno compatibility, staged Tauri-named executables, and uploaded a private artifact.
+  - Private artifact records:
+    - `sidecars-x86_64-pc-windows-msvc`: ID `8708007336`, 88,440,198 bytes,
+      `sha256:9c7227ed0c547f42ba45abb556af0777203ee1f9b767f3210a25013244b91cc7`.
+    - `sidecars-aarch64-pc-windows-msvc`: ID `8708021474`, 85,335,540 bytes,
+      `sha256:91abbb492f3764a44937c611b9a58abd92e39386d4d07d7a9bb652a44c11cbe6`.
+    - `sidecars-x86_64-apple-darwin`: ID `8707877334`, 103,580,717 bytes,
+      `sha256:ba1b190a33c4b673a31469aca572216c53d4e4ccd937f5e4b47c6bdf56546b52`.
+    - `sidecars-aarch64-apple-darwin`: ID `8707753516`, 99,177,503 bytes,
+      `sha256:233675456b363219fe1cc7b4d9e4da5ee2d28e18a2d2381b17af328d64c7f58f`.
+    - `sidecars-x86_64-unknown-linux-gnu`: ID `8707796663`, 113,952,185 bytes,
+      `sha256:7c396adc77a990113421f07d24c6635c9b3f8bbc3d9d31b57f755dfd6176249e`.
+    - `sidecars-aarch64-unknown-linux-gnu`: ID `8707770288`, 111,238,064 bytes,
+      `sha256:dadaf95ff93114eef939c3883b6ff1da9fd26f3a286f24065c988e74fc8ecedc`.
+- The opt-in live YouTube smoke command was not run because routine verification uses controlled
+  fixtures and no maintainer-controlled public smoke URL was supplied.

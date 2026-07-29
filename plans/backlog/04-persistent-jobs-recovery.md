@@ -1,7 +1,7 @@
 ---
 id: '04'
 title: Persistent jobs, recovery, and history
-status: blocked
+status: ready
 depends_on:
   - '03'
 unlocks:

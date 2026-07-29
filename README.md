@@ -3,9 +3,9 @@
 Local-first media tooling built around one reusable Rust engine, with a command-line interface and
 a native cross-platform desktop application.
 
-> **Status:** verified toolchain foundations plus public-video analysis and download CLI slices are
-> implemented. Persistent jobs, recovery, and the approved product UI are intentionally not
-> implemented yet.
+> **Status:** verified toolchain foundations, public-video analysis/download, and persistent
+> engine-owned jobs, recovery, history, and settings are implemented. Desktop integration and the
+> approved product UI remain later milestones.
 
 ## Architecture
 
@@ -37,6 +37,7 @@ completed so work can continue without relying on chat history.
 - Svelte 5 and strict TypeScript for the desktop interface
 - Vite 7 for frontend development and production bundling
 - Cargo and pnpm workspaces with committed lockfiles
+- Bundled SQLite for the local durable queue, settings, migrations, and history
 
 Dependencies are added only when real code needs them. The engine owns the typed asynchronous
 process boundary, verified tool resolution, URL policy, bounded yt-dlp adapter, normalized metadata,
@@ -115,15 +116,19 @@ cargo run -p yt-media-cli --bin yt-media -- analyze "$URL" --json --tool-dir "$T
 The complete field contract and compatibility policy are documented in
 [`docs/analyze-json-v1.md`](docs/analyze-json-v1.md).
 
-| Exit code | Meaning                                           |
-| --------- | ------------------------------------------------- |
-| `0`       | Success                                           |
-| `2`       | Invalid arguments or URL                          |
-| `3`       | Unsupported content                               |
-| `4`       | Required tool unavailable or invalid              |
-| `5`       | Extraction, bounded-protocol, or analysis failure |
-| `6`       | Cancelled with Ctrl+C after child-process cleanup |
-| `70`      | Internal CLI/runtime/output failure               |
+| Exit code | Meaning                                                |
+| --------- | ------------------------------------------------------ |
+| `0`       | Success                                                |
+| `2`       | Invalid arguments or URL                               |
+| `3`       | Unsupported content                                    |
+| `4`       | Required tool unavailable or invalid                   |
+| `5`       | Extraction, bounded-protocol, or analysis failure      |
+| `6`       | Cancelled with Ctrl+C after child-process cleanup      |
+| `7`       | Download, conversion, or verification failure          |
+| `8`       | Destination, reservation, or publication failure       |
+| `9`       | Paused after child-process cleanup                     |
+| `10`      | Durable queue, migration, locking, or recovery failure |
+| `70`      | Internal CLI/runtime/output failure                    |
 
 Ctrl+C cancels through the engine token and the Plan 01 process owner terminates and reaps the
 complete yt-dlp process tree before exit.
@@ -159,10 +164,37 @@ Human progress and warnings go to stderr. On success, stdout contains only the f
 emits versioned NDJSON events followed by one final result; the complete schema and exit-code
 contract are documented in [`docs/download-ndjson-v1.md`](docs/download-ndjson-v1.md).
 
-Pause is available through the reusable engine API. It stops and reaps the current process while
-retaining only documented yt-dlp resumable partials and a small versioned ownership marker. Ctrl+C
-requests cancellation, removes owned temporary, partial, and ownership files, and exits only after
-the child process tree is reaped.
+Every CLI download now enters the durable engine queue before work starts. Pause stops and reaps
+the current process while retaining only documented yt-dlp resumable partials and a versioned
+ownership manifest. Ctrl+C requests cancellation, removes only validated recorded engine-owned
+paths, and exits only after the child process tree is reaped.
+
+## Persistent Jobs, History, and Settings
+
+The CLI stores `jobs.sqlite3` in the platform application-data directory by default. Use
+`--data-dir <PATH>` for isolated automation, tests, or a portable development database. Opening a
+database performs migrations and recovery only: previously active work becomes `interrupted` and
+never resumes until an explicit command.
+
+```bash
+yt-media --data-dir ./local-data jobs list --json
+yt-media --data-dir ./local-data jobs get <UUIDV7> --json
+yt-media --data-dir ./local-data jobs pause <UUIDV7>
+yt-media --data-dir ./local-data jobs cancel <UUIDV7>
+yt-media --data-dir ./local-data jobs resume <UUIDV7> --tool-dir "$TOOL_DIR"
+yt-media --data-dir ./local-data jobs retry <UUIDV7> --tool-dir "$TOOL_DIR"
+yt-media --data-dir ./local-data history list --json
+yt-media --data-dir ./local-data history remove <UUIDV7>
+yt-media --data-dir ./local-data settings show --json
+yt-media --data-dir ./local-data settings set --concurrency 2
+```
+
+The default concurrency is two and may be set from one through four. Download, merge, and
+conversion work share the same bound. FIFO order is durable; retries append to the queue, while
+resume and retry preserve the UUIDv7 identity and increment its attempt count. Completed history
+persists until explicit removal, and an externally moved or deleted output is reported as
+`missing` rather than silently dropping the record. The stable snapshot contract is documented in
+[`docs/jobs-json-v1.md`](docs/jobs-json-v1.md).
 
 ### Opt-in live smoke
 

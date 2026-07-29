@@ -44,6 +44,11 @@ The opt-in live analysis smoke is documented in the root README. A maintainer mu
 the public on-demand URL and verified tool directory; routine tests and CI must never select or
 contact a live third-party video.
 
+Persistent queue tests use isolated temporary `--data-dir` directories and compiled process
+fixtures. Migration fixtures must remain deterministic and must verify rollback, future-version,
+locking, and corruption behavior without replacing a database. Queue tests must never use a live
+media URL for network access.
+
 ## Pull Requests
 
 - Explain the user-visible outcome and architectural impact.

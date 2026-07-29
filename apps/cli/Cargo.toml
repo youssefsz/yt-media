@@ -37,5 +37,10 @@ name = "download_cli"
 path = "tests/download_cli.rs"
 required-features = ["test-fixture"]
 
+[[test]]
+name = "jobs_cli"
+path = "tests/jobs_cli.rs"
+required-features = ["test-fixture"]
+
 [lints]
 workspace = true

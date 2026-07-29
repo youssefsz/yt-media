@@ -55,8 +55,11 @@ fn run_download(
     quality: &str,
     additional: &[&str],
 ) -> Result<Output, Box<dyn Error>> {
+    let data = tempdir()?;
     let mut command = Command::new(cli_path()?);
     command
+        .args(["--data-dir"])
+        .arg(data.path())
         .args([
             "download",
             "https://youtu.be/dQw4w9WgXcQ",
@@ -180,8 +183,11 @@ fn invalid_quality_and_destination_have_stable_exit_codes() -> Result<(), Box<dy
 fn ctrl_c_cancels_download_and_reaps_the_process_tree() -> Result<(), Box<dyn Error>> {
     let tools = fixture_tool_directory()?;
     let output = tempdir()?;
+    let data = tempdir()?;
     let heartbeat = output.path().join("heartbeat");
     let mut child = Command::new(cli_path()?)
+        .args(["--data-dir"])
+        .arg(data.path())
         .args([
             "download",
             "https://youtu.be/dQw4w9WgXcQ",

@@ -18,8 +18,13 @@ use yt_media_engine::{
     },
     cancellation::CancellationToken,
     download::{
-        AudioQuality, Destination, DownloadError, DownloadRequest, DownloadService, DownloadTools,
-        JobEvent, JobEventKind, JobStage, OutputName, OutputSelection, VideoQuality,
+        AudioQuality, Destination, DownloadError, DownloadRequest, DownloadResult, DownloadService,
+        DownloadTools, JobEvent, JobEventKind, JobId, JobStage, OutputName, OutputSelection,
+        VideoQuality,
+    },
+    jobs::{
+        EngineSettings, JobErrorClass, JobQueue, JobRecord, JobState, QueueConcurrency, QueueError,
+        SettingsPatch, UpdatePreference,
     },
     resolver::{ResolutionMode, ToolResolutionConfig, ToolResolutionError, ToolResolver},
     target::SupportedTarget,
@@ -28,6 +33,7 @@ use yt_media_engine::{
 
 const ANALYZE_SCHEMA_VERSION: u32 = 1;
 const DOWNLOAD_SCHEMA_VERSION: u32 = 1;
+const JOBS_SCHEMA_VERSION: u32 = 1;
 
 /// Stable process exit codes for the CLI contract.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,6 +57,8 @@ pub enum ExitCode {
     OutputFailure = 8,
     /// An API caller paused the job after process-tree cleanup.
     Paused = 9,
+    /// Durable queue, migration, locking, or recovery failed.
+    PersistenceFailure = 10,
     /// The CLI adapter or runtime failed unexpectedly.
     InternalFailure = 70,
 }
@@ -71,6 +79,9 @@ impl ExitCode {
     color = clap::ColorChoice::Never
 )]
 struct Cli {
+    /// Override the platform application-data directory for isolation and automation.
+    #[arg(long, global = true, value_name = "PATH")]
+    data_dir: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -113,6 +124,133 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         tool_dir: Option<PathBuf>,
     },
+    /// Inspect and control durable jobs.
+    Jobs {
+        #[command(subcommand)]
+        command: JobsCommand,
+    },
+    /// Inspect or remove durable terminal history.
+    History {
+        #[command(subcommand)]
+        command: HistoryCommand,
+    },
+    /// Inspect or update persisted engine settings.
+    Settings {
+        #[command(subcommand)]
+        command: SettingsCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum JobsCommand {
+    /// List all durable jobs.
+    List {
+        /// Emit one stable JSON document.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect one durable job.
+    Get {
+        /// `UUIDv7` job identity.
+        id: String,
+        /// Emit one stable JSON document.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Pause queued or active work after process cleanup.
+    Pause {
+        /// `UUIDv7` job identity.
+        id: String,
+        /// Emit one stable JSON document.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Cancel work and remove only recorded engine-owned paths.
+    Cancel {
+        /// `UUIDv7` job identity.
+        id: String,
+        /// Emit one stable JSON document.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Explicitly resume a paused or interrupted job and wait for it.
+    Resume {
+        /// `UUIDv7` job identity.
+        id: String,
+        /// Emit schema-versioned progress and result NDJSON.
+        #[arg(long)]
+        json: bool,
+        /// Directory containing exact yt-dlp, `FFmpeg`, `FFprobe`, and Deno executables.
+        #[arg(long, value_name = "PATH")]
+        tool_dir: Option<PathBuf>,
+    },
+    /// Explicitly append a failed or cancelled job to retry order and wait for it.
+    Retry {
+        /// `UUIDv7` job identity.
+        id: String,
+        /// Emit schema-versioned progress and result NDJSON.
+        #[arg(long)]
+        json: bool,
+        /// Directory containing exact yt-dlp, `FFmpeg`, `FFprobe`, and Deno executables.
+        #[arg(long, value_name = "PATH")]
+        tool_dir: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum HistoryCommand {
+    /// List durable terminal history.
+    List {
+        /// Emit one stable JSON document.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove one completed history record without deleting its output.
+    Remove {
+        /// `UUIDv7` completed job identity.
+        id: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliUpdatePreference {
+    Notify,
+    Automatic,
+    Disabled,
+}
+
+#[derive(Debug, Subcommand)]
+enum SettingsCommand {
+    /// Show persisted engine settings.
+    Show {
+        /// Emit one stable JSON document.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Update one or more persisted engine settings.
+    Set {
+        /// Set the default destination.
+        #[arg(long, value_name = "DIR", conflicts_with = "clear_default_destination")]
+        default_destination: Option<PathBuf>,
+        /// Clear the persisted default destination.
+        #[arg(long)]
+        clear_default_destination: bool,
+        /// Shared download and post-processing concurrency from one through four.
+        #[arg(long)]
+        concurrency: Option<u8>,
+        /// Managed tool update behavior.
+        #[arg(long, value_enum)]
+        update_preference: Option<CliUpdatePreference>,
+        /// Last selected output container.
+        #[arg(long, value_enum, requires = "quality")]
+        format: Option<CliOutputFormat>,
+        /// Last selected MP3 bitrate or MP4 height.
+        #[arg(long, requires = "format")]
+        quality: Option<u32>,
+        /// Emit one stable JSON document.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -131,6 +269,15 @@ struct DownloadCommandArgs {
     tool_dir: Option<PathBuf>,
 }
 
+struct ExistingJobCommandArgs<'a> {
+    raw_id: &'a str,
+    resume: bool,
+    json: bool,
+    tool_directory: Option<&'a Path>,
+    data_directory: Option<&'a Path>,
+    cancellation: CancellationToken,
+}
+
 #[derive(Debug)]
 enum CommandFailure {
     InvalidInput(String),
@@ -141,6 +288,7 @@ enum CommandFailure {
     Output(String),
     Cancelled,
     Paused,
+    Queue(String),
     Internal(String),
 }
 
@@ -155,6 +303,7 @@ impl CommandFailure {
             Self::Output(_) => ExitCode::OutputFailure,
             Self::Cancelled => ExitCode::Cancelled,
             Self::Paused => ExitCode::Paused,
+            Self::Queue(_) => ExitCode::PersistenceFailure,
             Self::Internal(_) => ExitCode::InternalFailure,
         }
     }
@@ -167,6 +316,7 @@ impl CommandFailure {
             | Self::Analysis(message)
             | Self::Download(message)
             | Self::Output(message)
+            | Self::Queue(message)
             | Self::Internal(message) => message,
             Self::Cancelled => "operation was cancelled",
             Self::Paused => "download was paused",
@@ -216,6 +366,24 @@ struct DownloadLagDocument<'a> {
     dropped_events: u64,
 }
 
+#[derive(Serialize)]
+struct JobsDocument<'a> {
+    schema_version: u32,
+    jobs: &'a [JobRecord],
+}
+
+#[derive(Serialize)]
+struct JobDocument<'a> {
+    schema_version: u32,
+    job: &'a JobRecord,
+}
+
+#[derive(Serialize)]
+struct SettingsDocument<'a> {
+    schema_version: u32,
+    settings: &'a EngineSettings,
+}
+
 /// Parses process arguments, executes the requested command, and writes the stable terminal
 /// contract to the real standard streams.
 pub async fn run_environment() -> ExitCode {
@@ -232,7 +400,13 @@ async fn run(arguments: Vec<OsString>, stdout: &mut dyn Write, stderr: &mut dyn 
     };
     let cancellation = CancellationToken::new();
     let result = {
-        let operation = execute(cli.command, cancellation.clone(), stdout, stderr);
+        let operation = execute(
+            cli.command,
+            cli.data_dir.as_deref(),
+            cancellation.clone(),
+            stdout,
+            stderr,
+        );
         tokio::pin!(operation);
         tokio::select! {
             result = &mut operation => result,
@@ -301,6 +475,7 @@ enum SuccessOutput {
 
 async fn execute(
     command: Command,
+    data_directory: Option<&Path>,
     cancellation: CancellationToken,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
@@ -330,6 +505,7 @@ async fn execute(
                     json,
                     tool_dir,
                 },
+                data_directory,
                 cancellation,
                 stdout,
                 stderr,
@@ -337,6 +513,11 @@ async fn execute(
             .await?;
             Ok(SuccessOutput::Written)
         }
+        Command::Jobs { command } => {
+            execute_jobs(command, data_directory, cancellation, stdout, stderr).await
+        }
+        Command::History { command } => execute_history(command, data_directory).await,
+        Command::Settings { command } => execute_settings(command, data_directory).await,
     }
 }
 
@@ -380,6 +561,7 @@ async fn execute_analyze(
 
 async fn execute_download(
     arguments: DownloadCommandArgs,
+    data_directory: Option<&Path>,
     cancellation: CancellationToken,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
@@ -393,8 +575,294 @@ async fn execute_download(
     )?;
     let tools =
         resolve_download_tools(arguments.tool_dir.as_deref(), cancellation.child_token()).await?;
-    let started = DownloadService::new(tools).start(request);
-    drive_started_download(started, arguments.json, cancellation, stdout, stderr).await
+    let queue = open_queue(data_directory, Some(DownloadService::new(tools))).await?;
+    let mut subscription = queue.subscribe();
+    let record = queue.enqueue(request).await.map_err(map_queue_error)?;
+    drive_queued_job(
+        &queue,
+        &mut subscription,
+        &record.id,
+        arguments.json,
+        cancellation,
+        stdout,
+        stderr,
+    )
+    .await
+}
+
+async fn execute_jobs(
+    command: JobsCommand,
+    data_directory: Option<&Path>,
+    cancellation: CancellationToken,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<SuccessOutput, CommandFailure> {
+    match command {
+        JobsCommand::List { json } => {
+            let queue = open_queue(data_directory, None).await?;
+            let jobs = queue.list().await.map_err(map_queue_error)?;
+            render_jobs_output(&jobs, json)
+        }
+        JobsCommand::Get { id, json } => {
+            let id = parse_job_id(&id)?;
+            let queue = open_queue(data_directory, None).await?;
+            let job = queue.get(&id).await.map_err(map_queue_error)?;
+            render_job_output(&job, json)
+        }
+        JobsCommand::Pause { id, json } => {
+            let id = parse_job_id(&id)?;
+            let queue = open_queue(data_directory, None).await?;
+            let job = queue.pause(&id).await.map_err(map_queue_error)?;
+            render_job_output(&job, json)
+        }
+        JobsCommand::Cancel { id, json } => {
+            let id = parse_job_id(&id)?;
+            let queue = open_queue(data_directory, None).await?;
+            let job = queue.cancel(&id).await.map_err(map_queue_error)?;
+            render_job_output(&job, json)
+        }
+        JobsCommand::Resume { id, json, tool_dir } => {
+            execute_existing_job(
+                ExistingJobCommandArgs {
+                    raw_id: &id,
+                    resume: true,
+                    json,
+                    tool_directory: tool_dir.as_deref(),
+                    data_directory,
+                    cancellation,
+                },
+                stdout,
+                stderr,
+            )
+            .await?;
+            Ok(SuccessOutput::Written)
+        }
+        JobsCommand::Retry { id, json, tool_dir } => {
+            execute_existing_job(
+                ExistingJobCommandArgs {
+                    raw_id: &id,
+                    resume: false,
+                    json,
+                    tool_directory: tool_dir.as_deref(),
+                    data_directory,
+                    cancellation,
+                },
+                stdout,
+                stderr,
+            )
+            .await?;
+            Ok(SuccessOutput::Written)
+        }
+    }
+}
+
+async fn execute_existing_job(
+    arguments: ExistingJobCommandArgs<'_>,
+    stdout: &mut dyn Write,
+    stderr: &mut dyn Write,
+) -> Result<(), CommandFailure> {
+    let id = parse_job_id(arguments.raw_id)?;
+    let tools = resolve_download_tools(
+        arguments.tool_directory,
+        arguments.cancellation.child_token(),
+    )
+    .await?;
+    let queue = open_queue(arguments.data_directory, Some(DownloadService::new(tools))).await?;
+    let mut subscription = queue.subscribe();
+    if arguments.resume {
+        queue.resume(&id).await.map_err(map_queue_error)?;
+    } else {
+        queue.retry(&id).await.map_err(map_queue_error)?;
+    }
+    drive_queued_job(
+        &queue,
+        &mut subscription,
+        &id,
+        arguments.json,
+        arguments.cancellation,
+        stdout,
+        stderr,
+    )
+    .await
+}
+
+async fn execute_history(
+    command: HistoryCommand,
+    data_directory: Option<&Path>,
+) -> Result<SuccessOutput, CommandFailure> {
+    let queue = open_queue(data_directory, None).await?;
+    match command {
+        HistoryCommand::List { json } => {
+            let jobs = queue.history().await.map_err(map_queue_error)?;
+            render_jobs_output(&jobs, json)
+        }
+        HistoryCommand::Remove { id } => {
+            let id = parse_job_id(&id)?;
+            queue.remove_completed(&id).await.map_err(map_queue_error)?;
+            Ok(SuccessOutput::Human {
+                rendered: format!("removed completed history {id}\n"),
+                warnings: Vec::new(),
+            })
+        }
+    }
+}
+
+async fn execute_settings(
+    command: SettingsCommand,
+    data_directory: Option<&Path>,
+) -> Result<SuccessOutput, CommandFailure> {
+    let queue = open_queue(data_directory, None).await?;
+    match command {
+        SettingsCommand::Show { json } => {
+            let settings = queue.settings().await.map_err(map_queue_error)?;
+            render_settings_output(&settings, json)
+        }
+        SettingsCommand::Set {
+            default_destination,
+            clear_default_destination,
+            concurrency,
+            update_preference,
+            format,
+            quality,
+            json,
+        } => {
+            let queue_concurrency = concurrency
+                .map(QueueConcurrency::try_from)
+                .transpose()
+                .map_err(|error| CommandFailure::InvalidInput(error.to_string()))?;
+            let update_preference = update_preference.map(|preference| match preference {
+                CliUpdatePreference::Notify => UpdatePreference::Notify,
+                CliUpdatePreference::Automatic => UpdatePreference::Automatic,
+                CliUpdatePreference::Disabled => UpdatePreference::Disabled,
+            });
+            let last_output = format
+                .zip(quality)
+                .map(|(format, quality)| build_output_selection(format, quality))
+                .transpose()?;
+            let default_destination = if clear_default_destination {
+                Some(None)
+            } else {
+                default_destination.map(Some)
+            };
+            let settings = queue
+                .update_settings(SettingsPatch {
+                    default_destination,
+                    queue_concurrency,
+                    update_preference,
+                    last_output,
+                })
+                .await
+                .map_err(map_queue_error)?;
+            render_settings_output(&settings, json)
+        }
+    }
+}
+
+async fn open_queue(
+    data_directory: Option<&Path>,
+    service: Option<DownloadService>,
+) -> Result<JobQueue, CommandFailure> {
+    let directory = match data_directory {
+        Some(path) => path.to_path_buf(),
+        None => JobQueue::platform_data_directory().map_err(map_queue_error)?,
+    };
+    match service {
+        Some(service) => JobQueue::open_with_download_service(directory, service)
+            .await
+            .map_err(map_queue_error),
+        None => JobQueue::open(directory).await.map_err(map_queue_error),
+    }
+}
+
+fn parse_job_id(value: &str) -> Result<JobId, CommandFailure> {
+    JobId::parse(value).map_err(|error| CommandFailure::InvalidInput(error.to_string()))
+}
+
+fn map_queue_error(error: QueueError) -> CommandFailure {
+    match error {
+        QueueError::InvalidRequest(message) => CommandFailure::InvalidInput(message),
+        QueueError::Destination(message) => CommandFailure::Output(message),
+        QueueError::Ownership(source) => map_download_error(source),
+        other => CommandFailure::Queue(other.to_string()),
+    }
+}
+
+fn render_jobs_output(jobs: &[JobRecord], json: bool) -> Result<SuccessOutput, CommandFailure> {
+    if json {
+        serialize_json_document(&JobsDocument {
+            schema_version: JOBS_SCHEMA_VERSION,
+            jobs,
+        })
+    } else {
+        let rendered = if jobs.is_empty() {
+            "no jobs\n".to_owned()
+        } else {
+            jobs.iter()
+                .map(render_job_summary)
+                .collect::<Vec<_>>()
+                .join("\n")
+                + "\n"
+        };
+        Ok(SuccessOutput::Human {
+            rendered,
+            warnings: Vec::new(),
+        })
+    }
+}
+
+fn render_job_output(job: &JobRecord, json: bool) -> Result<SuccessOutput, CommandFailure> {
+    if json {
+        serialize_json_document(&JobDocument {
+            schema_version: JOBS_SCHEMA_VERSION,
+            job,
+        })
+    } else {
+        Ok(SuccessOutput::Human {
+            rendered: format!("{}\n", render_job_summary(job)),
+            warnings: Vec::new(),
+        })
+    }
+}
+
+fn render_job_summary(job: &JobRecord) -> String {
+    format!(
+        "{}\t{}\tattempt {}\t{}",
+        job.id, job.state, job.attempt_count, job.request.canonical_url
+    )
+}
+
+fn render_settings_output(
+    settings: &EngineSettings,
+    json: bool,
+) -> Result<SuccessOutput, CommandFailure> {
+    if json {
+        serialize_json_document(&SettingsDocument {
+            schema_version: JOBS_SCHEMA_VERSION,
+            settings,
+        })
+    } else {
+        Ok(SuccessOutput::Human {
+            rendered: format!(
+                "default destination: {}\nqueue concurrency: {}\nupdate preference: {:?}\nlast output: {:?}\n",
+                settings
+                    .default_destination
+                    .as_ref()
+                    .map_or_else(|| "(none)".to_owned(), |path| path.display().to_string()),
+                settings.queue_concurrency.get(),
+                settings.update_preference,
+                settings.last_output,
+            ),
+            warnings: Vec::new(),
+        })
+    }
+}
+
+fn serialize_json_document(document: &impl Serialize) -> Result<SuccessOutput, CommandFailure> {
+    let mut bytes = serde_json::to_vec(document).map_err(|error| {
+        CommandFailure::Internal(format!("could not serialize command JSON: {error}"))
+    })?;
+    bytes.push(b'\n');
+    Ok(SuccessOutput::Json(bytes))
 }
 
 fn build_download_request(
@@ -411,23 +879,7 @@ fn build_download_request(
             CommandFailure::InvalidInput(error.to_string())
         }
     })?;
-    let selection = match format {
-        CliOutputFormat::Mp3 => {
-            let bitrate = u16::try_from(quality).map_err(|_| {
-                CommandFailure::InvalidInput(format!(
-                    "invalid MP3 quality `{quality}`; expected 128, 192, 256, or 320"
-                ))
-            })?;
-            OutputSelection::Mp3(
-                AudioQuality::try_from(bitrate)
-                    .map_err(|error| CommandFailure::InvalidInput(error.to_string()))?,
-            )
-        }
-        CliOutputFormat::Mp4 => OutputSelection::Mp4(
-            VideoQuality::try_from(quality)
-                .map_err(|error| CommandFailure::InvalidInput(error.to_string()))?,
-        ),
-    };
+    let selection = build_output_selection(format, quality)?;
     let destination = Destination::new(output)
         .map_err(|error| CommandFailure::InvalidInput(error.to_string()))?;
     let name = name
@@ -442,36 +894,70 @@ fn build_download_request(
     })
 }
 
-async fn drive_started_download(
-    started: yt_media_engine::download::StartedDownload,
+fn build_output_selection(
+    format: CliOutputFormat,
+    quality: u32,
+) -> Result<OutputSelection, CommandFailure> {
+    match format {
+        CliOutputFormat::Mp3 => {
+            let bitrate = u16::try_from(quality).map_err(|_| {
+                CommandFailure::InvalidInput(format!(
+                    "invalid MP3 quality `{quality}`; expected 128, 192, 256, or 320"
+                ))
+            })?;
+            Ok(OutputSelection::Mp3(
+                AudioQuality::try_from(bitrate)
+                    .map_err(|error| CommandFailure::InvalidInput(error.to_string()))?,
+            ))
+        }
+        CliOutputFormat::Mp4 => Ok(OutputSelection::Mp4(
+            VideoQuality::try_from(quality)
+                .map_err(|error| CommandFailure::InvalidInput(error.to_string()))?,
+        )),
+    }
+}
+
+async fn drive_queued_job(
+    queue: &JobQueue,
+    events: &mut yt_media_engine::jobs::QueueSubscription,
+    job_id: &JobId,
     json: bool,
     cancellation: CancellationToken,
     stdout: &mut dyn Write,
     stderr: &mut dyn Write,
 ) -> Result<(), CommandFailure> {
-    let job_id = started.job_id;
-    let mut events = started.events;
-    let controls = started.controls;
-    let completion = started.completion.wait();
-    tokio::pin!(completion);
     let mut cancellation_forwarded = false;
 
-    let result = loop {
+    let final_record = loop {
         tokio::select! {
-            result = &mut completion => break result,
             event = events.recv() => {
                 match event {
-                    Ok(event) => {
-                        let rendered =
-                            render_event_for_mode(json, stdout, stderr, &event);
-                        if let Err(error) = rendered {
-                            controls.cancel();
-                            let _ignored = (&mut completion).await;
-                            return Err(CommandFailure::Internal(format!(
-                                "could not write download progress: {error}"
-                            )));
+                    Ok(event) if event.job.id == *job_id => {
+                        if let Some(kind) = event.activity {
+                            let rendered = render_event_for_mode(
+                                json,
+                                stdout,
+                                stderr,
+                                &JobEvent {
+                                    job_id: job_id.clone(),
+                                    sequence: event.sequence,
+                                    kind,
+                                },
+                            );
+                            if let Err(error) = rendered {
+                                let _ignored = queue.cancel(job_id).await;
+                                return Err(CommandFailure::Internal(format!(
+                                    "could not write download progress: {error}"
+                                )));
+                            }
+                        }
+                        if event.job.state.is_terminal()
+                            || matches!(event.job.state, JobState::Paused | JobState::Interrupted)
+                        {
+                            break event.job;
                         }
                     }
+                    Ok(_) => {}
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
                         let rendered = if json {
                             write_json_line(
@@ -479,7 +965,7 @@ async fn drive_started_download(
                                 &DownloadLagDocument {
                                     schema_version: DOWNLOAD_SCHEMA_VERSION,
                                     event: "stream-lagged",
-                                    job_id: &job_id,
+                                    job_id,
                                     dropped_events: count,
                                 },
                             )
@@ -490,29 +976,29 @@ async fn drive_started_download(
                             )
                         };
                         if let Err(error) = rendered {
-                            controls.cancel();
-                            let _ignored = (&mut completion).await;
+                            let _ignored = queue.cancel(job_id).await;
                             return Err(CommandFailure::Internal(format!(
                                 "could not write progress lag notice: {error}"
                             )));
                         }
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        return Err(CommandFailure::Internal(
+                            "queue event stream closed before job completion".to_owned(),
+                        ));
+                    }
                 }
             }
             () = cancellation.cancelled(), if !cancellation_forwarded => {
                 cancellation_forwarded = true;
-                controls.cancel();
+                let record = queue.cancel(job_id).await.map_err(map_queue_error)?;
+                if record.state.is_terminal() {
+                    break record;
+                }
             }
         }
     };
-
-    while let Ok(event) = events.try_recv() {
-        render_event_for_mode(json, stdout, stderr, &event).map_err(|error| {
-            CommandFailure::Internal(format!("could not write final download event: {error}"))
-        })?;
-    }
-    render_download_completion(result, &job_id, json, stdout)
+    render_job_completion(final_record, json, stdout)
 }
 
 fn render_event_for_mode(
@@ -534,59 +1020,81 @@ fn render_event_for_mode(
     }
 }
 
-fn render_download_completion(
-    result: Result<yt_media_engine::download::DownloadResult, DownloadError>,
-    job_id: &yt_media_engine::download::JobId,
+fn render_job_completion(
+    record: JobRecord,
     json: bool,
     stdout: &mut dyn Write,
 ) -> Result<(), CommandFailure> {
-    match result {
-        Ok(result) => {
-            if json {
-                write_json_line(
-                    stdout,
-                    &DownloadResultDocument {
-                        schema_version: DOWNLOAD_SCHEMA_VERSION,
-                        event: "result",
-                        result: &result,
-                    },
-                )
-                .map_err(|error| {
-                    CommandFailure::Internal(format!(
-                        "could not write final download result: {error}"
-                    ))
-                })?;
-            } else {
-                writeln!(stdout, "{}", result.path.display()).map_err(|error| {
-                    CommandFailure::Internal(format!("could not write final output path: {error}"))
-                })?;
-            }
-            Ok(())
+    if record.state == JobState::Completed {
+        let output = record.final_output.ok_or_else(|| {
+            CommandFailure::Internal("completed job had no final output metadata".to_owned())
+        })?;
+        let result = DownloadResult {
+            job_id: record.id,
+            path: output.path,
+            size_bytes: output.size_bytes,
+            output: output.output,
+        };
+        if json {
+            write_json_line(
+                stdout,
+                &DownloadResultDocument {
+                    schema_version: DOWNLOAD_SCHEMA_VERSION,
+                    event: "result",
+                    result: &result,
+                },
+            )
+            .map_err(|error| {
+                CommandFailure::Internal(format!("could not write final download result: {error}"))
+            })?;
+        } else {
+            writeln!(stdout, "{}", result.path.display()).map_err(|error| {
+                CommandFailure::Internal(format!("could not write final output path: {error}"))
+            })?;
         }
-        Err(error) => {
-            let failure = map_download_error(error);
-            if json {
-                write_json_line(
-                    stdout,
-                    &DownloadErrorDocument {
-                        schema_version: DOWNLOAD_SCHEMA_VERSION,
-                        event: "result",
-                        job_id,
-                        error: DownloadErrorBody {
-                            code: failure.exit_code().value(),
-                            message: failure.message(),
-                        },
-                    },
-                )
-                .map_err(|write_error| {
-                    CommandFailure::Internal(format!(
-                        "could not write final download error: {write_error}"
-                    ))
-                })?;
-            }
-            Err(failure)
-        }
+        return Ok(());
     }
+    let failure = match record.state {
+        JobState::Cancelled => CommandFailure::Cancelled,
+        JobState::Paused | JobState::Interrupted => CommandFailure::Paused,
+        JobState::Failed => {
+            let message = record.error.as_ref().map_or_else(
+                || "job failed without a diagnostic".to_owned(),
+                |error| error.message.clone(),
+            );
+            match record.error.as_ref().map(|error| error.class) {
+                Some(JobErrorClass::InvalidRequest) => CommandFailure::InvalidInput(message),
+                Some(JobErrorClass::DestinationUnavailable | JobErrorClass::Filesystem) => {
+                    CommandFailure::Output(message)
+                }
+                Some(JobErrorClass::Internal) => CommandFailure::Queue(message),
+                _ => CommandFailure::Download(message),
+            }
+        }
+        state => CommandFailure::Internal(format!(
+            "job ended output processing in unexpected `{state}` state"
+        )),
+    };
+    if json {
+        write_json_line(
+            stdout,
+            &DownloadErrorDocument {
+                schema_version: DOWNLOAD_SCHEMA_VERSION,
+                event: "result",
+                job_id: &record.id,
+                error: DownloadErrorBody {
+                    code: failure.exit_code().value(),
+                    message: failure.message(),
+                },
+            },
+        )
+        .map_err(|write_error| {
+            CommandFailure::Internal(format!(
+                "could not write final download error: {write_error}"
+            ))
+        })?;
+    }
+    Err(failure)
 }
 
 fn render_download_event(writer: &mut dyn Write, event: &JobEvent) -> io::Result<()> {
@@ -897,6 +1405,7 @@ mod tests {
         assert_eq!(ExitCode::DownloadFailure.value(), 7);
         assert_eq!(ExitCode::OutputFailure.value(), 8);
         assert_eq!(ExitCode::Paused.value(), 9);
+        assert_eq!(ExitCode::PersistenceFailure.value(), 10);
         assert_eq!(ExitCode::InternalFailure.value(), 70);
     }
 

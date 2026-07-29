@@ -1,12 +1,12 @@
 ---
 id: '06'
 title: Desktop UI, accessibility, and motion
-status: ready
+status: in-progress
 depends_on:
   - '05'
 unlocks:
   - '07'
-started_at: null
+started_at: '2026-07-29T09:12:50Z'
 completed_at: null
 implementation_commits: []
 ---

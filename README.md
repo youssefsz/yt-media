@@ -3,9 +3,9 @@
 Local-first media tooling built around one reusable Rust engine, with a command-line interface and
 a native cross-platform desktop application.
 
-> **Status:** verified toolchain foundations, public-video analysis/download, and persistent
-> engine-owned jobs, recovery, history, and settings are implemented. Desktop integration and the
-> approved product UI remain later milestones.
+> **Status:** verified toolchain foundations, public-video analysis/download, persistent
+> engine-owned jobs, and the typed native desktop integration are implemented. The polished
+> desktop product UI remains the next milestone.
 
 ## Architecture
 
@@ -67,8 +67,10 @@ pnpm dev            # launch the Tauri desktop scaffold
 pnpm build          # build frontend assets
 pnpm check          # strict Svelte and TypeScript checks
 pnpm lint           # ESLint and Clippy
-pnpm test           # Rust workspace tests
+pnpm test           # frontend, IPC drift, and Rust workspace tests
 pnpm format:check   # Prettier and rustfmt verification
+pnpm ipc:generate   # regenerate Rust-owned TypeScript IPC DTOs
+pnpm ipc:check      # fail when checked-in IPC DTOs drift
 cargo run -p yt-media-cli --bin yt-media -- --help
 ```
 
@@ -195,6 +197,28 @@ resume and retry preserve the UUIDv7 identity and increment its attempt count. C
 persists until explicit removal, and an externally moved or deleted output is reported as
 `missing` rather than silently dropping the record. The stable snapshot contract is documented in
 [`docs/jobs-json-v1.md`](docs/jobs-json-v1.md).
+
+## Desktop Integration
+
+The Tauri shell owns one application service over the same engine queue used by the CLI. It
+recovers interrupted work before bootstrap, exposes only typed named commands, forwards monotonic
+versioned job events, focuses the existing window on a second launch, and performs bounded
+asynchronous shutdown. The minimal current Svelte scaffold reports bootstrap and tool diagnostics;
+the full product interface belongs to Plan 06.
+
+The command, event, reconnect, generated-type, and safe-error contracts are documented in
+[`docs/desktop-ipc-v1.md`](docs/desktop-ipc-v1.md).
+
+To prepare verified current-target tools for a native package, run the complete sidecar workflow
+and then stage its verified outputs into Tauri's ignored resource input:
+
+```bash
+cargo xtask sidecars stage --target <RUST_TARGET_TRIPLE> --desktop
+pnpm build:desktop
+```
+
+Tauri bundles the target-qualified executables and `SHA256SUMS` inventory as resources. The engine
+verifies both checksums and exact tool identities before enabling analysis or downloads.
 
 ### Opt-in live smoke
 

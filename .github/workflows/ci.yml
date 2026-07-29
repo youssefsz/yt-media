@@ -79,7 +79,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, windows-2022]
+        os:
+          - windows-2025
+          - windows-11-arm
+          - macos-15-intel
+          - macos-15
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
 
     steps:
       - name: Check out repository
@@ -92,6 +98,18 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            build-essential \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev
 
       - name: Check Rust workspace
         run: cargo check --workspace --all-targets --all-features

@@ -100,6 +100,7 @@ cargo xtask sidecars build --target x86_64-pc-windows-msvc
 cargo xtask sidecars verify --target x86_64-pc-windows-msvc
 cargo xtask sidecars probe --target x86_64-pc-windows-msvc
 cargo xtask sidecars stage --target x86_64-pc-windows-msvc
+cargo xtask sidecars stage --target x86_64-pc-windows-msvc --desktop
 ```
 
 `fetch` is idempotent. It retries only transient network and HTTP failures with a bounded budget,
@@ -115,7 +116,9 @@ path as its sole enabled runtime. An explicit network-dependent EJS extraction s
 with `--ejs-url <PUBLIC_TEST_URL>`; it also rejects yt-dlp's standard missing-runtime and challenge
 solver warnings. Routine tests never require a mutable third-party URL.
 
-`stage` first performs full verification, then creates a clean target directory with Tauri names:
+`stage` first performs full verification, then creates a clean target directory with Tauri names.
+Pass `--desktop` to atomically populate the ignored `apps/desktop/src-tauri/binaries/` input used
+by Tauri's resource bundler for the current target:
 
 ```text
 yt-dlp-<target>[.exe]

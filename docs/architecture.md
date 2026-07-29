@@ -126,6 +126,17 @@ The desktop Rust shell translates typed IPC messages, owns native dialogs and pl
 and emits engine events to the UI. The Svelte layer renders state and user intent; it does not
 execute media tools or implement product policy.
 
+The shell holds one managed application service. Bootstrap initializes and recovers the durable
+engine queue before reporting health, composes analyzers and downloads only from engine-verified
+tools, and forwards versioned queue snapshots as bounded events. Rust-owned DTOs are distinct from
+engine domain models and generate the checked-in TypeScript contract. A reconnecting listener
+subscribes first, obtains an authoritative snapshot boundary, and ignores older buffered events.
+
+Native folder selection and output reveal are named Rust commands. The webview has no general shell,
+process, dialog-plugin, opener-plugin, or arbitrary filesystem capability. Single-instance
+coordination runs before service initialization, and exit requests trigger asynchronous bounded
+queue shutdown without blocking the native event loop.
+
 ## External Tools
 
 `yt-dlp`, FFmpeg, FFprobe, and any required JavaScript runtime are adapters, not the public engine

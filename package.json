@@ -15,13 +15,16 @@
   },
   "scripts": {
     "build": "pnpm --filter @yt-media/desktop build",
-    "build:desktop": "pnpm --filter @yt-media/desktop tauri build",
+    "build:desktop": "pnpm --filter @yt-media/desktop tauri build --config src-tauri/tauri.bundle.conf.json",
     "check": "pnpm --filter @yt-media/desktop check",
     "dev": "pnpm --filter @yt-media/desktop tauri dev",
     "format": "prettier --write . && cargo fmt --all",
     "format:check": "prettier --check . && cargo fmt --all -- --check",
+    "ipc:generate": "cargo run -p yt-media-desktop --bin generate-ipc",
+    "ipc:check": "cargo run -p yt-media-desktop --bin generate-ipc -- --check",
     "lint": "eslint . --max-warnings 0 && cargo clippy --workspace --all-targets --all-features -- -D warnings",
-    "test": "cargo test --workspace --all-features"
+    "sidecars:desktop": "cargo xtask sidecars stage --desktop",
+    "test": "pnpm --filter @yt-media/desktop test && pnpm ipc:check && cargo test --workspace --all-features"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

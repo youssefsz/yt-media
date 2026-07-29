@@ -468,6 +468,15 @@ pub struct QueueEvent {
     pub activity: Option<JobEventKind>,
 }
 
+/// An authoritative queue snapshot paired with its event-stream boundary.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct QueueSnapshot {
+    /// Highest event sequence reflected by, or older than, this snapshot.
+    pub last_event_sequence: u64,
+    /// Every durable job in creation order.
+    pub jobs: Vec<JobRecord>,
+}
+
 /// Bounded queue subscription that never blocks scheduler progress.
 pub struct QueueSubscription {
     pub(crate) receiver: broadcast::Receiver<QueueEvent>,

@@ -26,7 +26,7 @@ use crate::{
 
 use super::{
     EngineSettings, FinalOutput, JobErrorClass, JobFailure, JobRecord, JobRequest, JobState,
-    QueueEvent, QueueSubscription, SettingsPatch, StorageError,
+    QueueEvent, QueueSnapshot, QueueSubscription, SettingsPatch, StorageError,
     storage::{RequeueKind, SqliteStore},
 };
 
@@ -215,6 +215,29 @@ impl JobQueue {
     /// Returns a storage error when the snapshot cannot be read safely.
     pub async fn list(&self) -> Result<Vec<JobRecord>, QueueError> {
         Ok(self.inner.store.list_jobs(false).await?)
+    }
+
+    /// Reads an authoritative job snapshot and a stable event boundary for reconnecting clients.
+    ///
+    /// A caller should subscribe before requesting this snapshot, discard buffered events through
+    /// `last_event_sequence`, then consume later events. The retry loop prevents a queue mutation
+    /// from being split across the snapshot and its boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a storage error when the snapshot cannot be read safely.
+    pub async fn snapshot(&self) -> Result<QueueSnapshot, QueueError> {
+        loop {
+            let next_before = self.inner.event_sequence.load(Ordering::Acquire);
+            let jobs = self.list().await?;
+            let next_after = self.inner.event_sequence.load(Ordering::Acquire);
+            if next_before == next_after {
+                return Ok(QueueSnapshot {
+                    last_event_sequence: next_after.saturating_sub(1),
+                    jobs,
+                });
+            }
+        }
     }
 
     /// Lists persisted completed, cancelled, and failed history newest first.

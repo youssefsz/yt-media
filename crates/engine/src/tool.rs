@@ -173,4 +173,21 @@ mod tests {
         let result = Tool::Ffmpeg.validate_version_output("8.0.1", b"ffmpeg version n8.0.1\n", b"");
         assert!(result.is_ok());
     }
+
+    #[test]
+    fn staged_names_cover_every_release_target_without_ambiguity() {
+        for target in crate::target::SupportedTarget::ALL {
+            for tool in Tool::ALL {
+                let name = tool.staged_name(target);
+                assert!(name.contains(tool.name()));
+                assert!(name.contains(target.triple()));
+                assert_eq!(
+                    std::path::Path::new(&name)
+                        .extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe")),
+                    target.is_windows()
+                );
+            }
+        }
+    }
 }

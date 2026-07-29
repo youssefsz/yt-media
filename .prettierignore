@@ -4,6 +4,7 @@ target/
 dist/
 .svelte-kit/
 apps/desktop/src-tauri/gen/
+apps/desktop/src/lib/ipc/generated.ts
 Cargo.lock
 pnpm-lock.yaml
 docs/design/*.png

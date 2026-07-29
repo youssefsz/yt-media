@@ -7,8 +7,8 @@ mod storage;
 pub use model::{
     EngineSettings, FinalOutput, JobErrorClass, JobFailure, JobRecord, JobRequest, JobState,
     JobStateParseError, JobTransitionError, OutputAvailability, QueueConcurrency,
-    QueueConcurrencyError, QueueEvent, QueueSubscription, SettingsPatch, SettingsValueError,
-    UpdatePreference,
+    QueueConcurrencyError, QueueEvent, QueueSnapshot, QueueSubscription, SettingsPatch,
+    SettingsValueError, UpdatePreference,
 };
 pub use queue::{JobQueue, QueueError};
 pub use storage::StorageError;

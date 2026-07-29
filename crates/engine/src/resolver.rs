@@ -24,6 +24,7 @@ use crate::{
 };
 
 const MAX_BUILD_RECEIPT_BYTES: u64 = 1024 * 1024;
+const MAX_STAGED_CHECKSUM_BYTES: u64 = 16 * 1024;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 const PROBE_MAX_BYTES: usize = 64 * 1024;
 const PROBE_MAX_LINES: usize = 256;
@@ -73,6 +74,93 @@ impl VerifiedToolSet {
             target: manifest.target,
             paths,
         })
+    }
+
+    /// Verifies one Tauri-staged tool directory using its exact checksum inventory and identity
+    /// probes.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed error when the inventory is malformed, incomplete, escaped, changed, or a
+    /// staged executable does not identify as the pinned tool version.
+    pub async fn verify_staged(
+        target: SupportedTarget,
+        root: impl Into<PathBuf>,
+        runner: Arc<dyn ProcessRunner>,
+        cancellation: CancellationToken,
+    ) -> Result<Self, ToolSetVerificationError> {
+        let root = canonical_directory(root.into()).await?;
+        let checksum_path = root.join("SHA256SUMS");
+        let metadata = tokio::fs::metadata(&checksum_path)
+            .await
+            .map_err(|source| ToolSetVerificationError::Inspect {
+                path: checksum_path.clone(),
+                source,
+            })?;
+        if metadata.len() > MAX_STAGED_CHECKSUM_BYTES {
+            return Err(ToolSetVerificationError::ChecksumInventoryTooLarge {
+                path: checksum_path,
+                size: metadata.len(),
+            });
+        }
+        let document = tokio::fs::read_to_string(&checksum_path)
+            .await
+            .map_err(|source| ToolSetVerificationError::Inspect {
+                path: checksum_path,
+                source,
+            })?;
+        let mut checksums = BTreeMap::new();
+        for line in document.lines() {
+            let Some((digest, name)) = line.split_once("  ") else {
+                return Err(ToolSetVerificationError::InvalidChecksumInventory);
+            };
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                || name.is_empty()
+                || name.contains(['/', '\\'])
+                || checksums
+                    .insert(name.to_owned(), digest.to_owned())
+                    .is_some()
+            {
+                return Err(ToolSetVerificationError::InvalidChecksumInventory);
+            }
+        }
+        if checksums.len() != Tool::ALL.len() {
+            return Err(ToolSetVerificationError::InvalidChecksumInventory);
+        }
+
+        let mut paths = BTreeMap::new();
+        for tool in Tool::ALL {
+            let name = tool.staged_name(target);
+            let expected_hash = checksums
+                .remove(&name)
+                .ok_or(ToolSetVerificationError::StagedToolMissing { tool })?;
+            let path = confined_path(&root, &name).await?;
+            let size = tokio::fs::metadata(&path)
+                .await
+                .map_err(|source| ToolSetVerificationError::Inspect {
+                    path: path.clone(),
+                    source,
+                })?
+                .len();
+            verify_file_digest(tool, &path, size, &expected_hash).await?;
+            let executable_path = validate_executable_async(path).await?;
+            probe_tool(
+                runner.as_ref(),
+                tool,
+                tool.baseline_version(),
+                executable_path.as_path(),
+                cancellation.child_token(),
+            )
+            .await?;
+            paths.insert(tool, executable_path);
+        }
+        if !checksums.is_empty() {
+            return Err(ToolSetVerificationError::InvalidChecksumInventory);
+        }
+        Ok(Self { target, paths })
     }
 
     /// Returns this set's release target.
@@ -574,6 +662,23 @@ pub enum ToolSetVerificationError {
         /// Observed bytes.
         size: u64,
     },
+    /// The staged checksum inventory exceeded its parser bound.
+    #[error("staged checksum inventory `{}` is {size} bytes; maximum is {MAX_STAGED_CHECKSUM_BYTES}", path.display())]
+    ChecksumInventoryTooLarge {
+        /// Inventory path.
+        path: PathBuf,
+        /// Observed bytes.
+        size: u64,
+    },
+    /// The staged checksum inventory was malformed or contained unexpected entries.
+    #[error("staged checksum inventory is invalid")]
+    InvalidChecksumInventory,
+    /// The staged checksum inventory omitted one required executable.
+    #[error("staged checksum inventory omitted `{tool}`")]
+    StagedToolMissing {
+        /// Missing tool.
+        tool: Tool,
+    },
     /// Receipt map unexpectedly omitted a loaded path.
     #[error("native build receipt `{path}` was not loaded")]
     MissingReceipt {
@@ -726,6 +831,7 @@ mod tests {
     };
 
     use async_trait::async_trait;
+    use sha2::{Digest, Sha256};
     use tempfile::tempdir;
 
     use super::{
@@ -762,6 +868,12 @@ mod tests {
                 .unwrap_or_default();
             let stdout = if filename.contains("yt-dlp") {
                 b"2026.06.09\n".to_vec()
+            } else if filename.contains("ffprobe") {
+                b"ffprobe version 8.0.1\n".to_vec()
+            } else if filename.contains("ffmpeg") {
+                b"ffmpeg version 8.0.1\n".to_vec()
+            } else if filename.contains("deno") {
+                b"deno 2.8.1\n".to_vec()
             } else {
                 Vec::new()
             };
@@ -911,5 +1023,49 @@ mod tests {
             .resolve(Tool::YtDlp, target, &config, CancellationToken::new())
             .await;
         assert!(resolution.is_err());
+    }
+
+    #[tokio::test]
+    async fn verifies_exact_tauri_staged_inventory() {
+        let target = SupportedTarget::current();
+        assert!(target.is_ok());
+        let Some(target) = target.ok() else {
+            return;
+        };
+        let directory = tempdir();
+        assert!(directory.is_ok());
+        let Some(directory) = directory.ok() else {
+            return;
+        };
+        let mut checksums = Vec::new();
+        for tool in Tool::ALL {
+            let name = tool.staged_name(target);
+            let path = directory.path().join(&name);
+            make_executable(&path);
+            let bytes = fs::read(&path);
+            assert!(bytes.is_ok());
+            if let Ok(bytes) = bytes {
+                checksums.push(format!("{:x}  {name}", Sha256::digest(bytes)));
+            }
+        }
+        checksums.sort();
+        let document = format!("{}\n", checksums.join("\n"));
+        assert!(fs::write(directory.path().join("SHA256SUMS"), document).is_ok());
+        let runner = Arc::new(ProbeRunner::default());
+        let verified = VerifiedToolSet::verify_staged(
+            target,
+            directory.path(),
+            runner.clone(),
+            CancellationToken::new(),
+        )
+        .await;
+        assert!(verified.is_ok());
+        if let Ok(verified) = verified {
+            assert_eq!(verified.target(), target);
+            for tool in Tool::ALL {
+                assert!(verified.path(tool).is_some());
+            }
+        }
+        assert_eq!(runner.calls.load(Ordering::SeqCst), Tool::ALL.len());
     }
 }

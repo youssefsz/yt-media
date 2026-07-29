@@ -89,10 +89,19 @@ fn run(cli: XtaskCli) -> Result<(), SidecarError> {
                     context.probe(arguments.target, arguments.ejs_url.as_deref())
                 }
                 SidecarCommand::Stage(arguments) => {
-                    let stage_root = arguments
-                        .output
-                        .unwrap_or_else(|| context.repository.join(DEFAULT_STAGE_ROOT));
-                    context.stage(arguments.target, &stage_root)
+                    let stage_root = if arguments.desktop {
+                        context
+                            .repository
+                            .join("apps")
+                            .join("desktop")
+                            .join("src-tauri")
+                            .join("binaries")
+                    } else {
+                        arguments
+                            .output
+                            .unwrap_or_else(|| context.repository.join(DEFAULT_STAGE_ROOT))
+                    };
+                    context.stage(arguments.target, &stage_root, !arguments.desktop)
                 }
             }
         }
@@ -175,6 +184,9 @@ struct StageArguments {
     /// Staging root; the target triple is appended.
     #[arg(long)]
     output: Option<PathBuf>,
+    /// Stage directly into Tauri's ignored current-target resource input.
+    #[arg(long, conflicts_with = "output")]
+    desktop: bool,
 }
 
 struct SidecarContext {
@@ -449,20 +461,37 @@ impl SidecarContext {
         runtime.block_on(probe_verified_capabilities(&verified, ejs_url))
     }
 
-    fn stage(&self, target: SupportedTarget, stage_root: &Path) -> Result<(), SidecarError> {
+    fn stage(
+        &self,
+        target: SupportedTarget,
+        stage_root: &Path,
+        append_target: bool,
+    ) -> Result<(), SidecarError> {
         let verified = self.verify(target)?;
         fs::create_dir_all(stage_root).map_err(|source| SidecarError::Io {
             action: "create sidecar staging root",
             path: stage_root.to_path_buf(),
             source,
         })?;
-        let destination = stage_root.join(target.triple());
+        let destination = if append_target {
+            stage_root.join(target.triple())
+        } else {
+            stage_root.to_path_buf()
+        };
+        let temporary_parent = destination.parent().ok_or_else(|| SidecarError::NoParent {
+            path: destination.clone(),
+        })?;
+        fs::create_dir_all(temporary_parent).map_err(|source| SidecarError::Io {
+            action: "create sidecar staging parent",
+            path: temporary_parent.to_path_buf(),
+            source,
+        })?;
         let temporary = TempBuilder::new()
             .prefix("stage-")
-            .tempdir_in(stage_root)
+            .tempdir_in(temporary_parent)
             .map_err(|source| SidecarError::Io {
                 action: "create temporary sidecar staging directory",
-                path: stage_root.to_path_buf(),
+                path: temporary_parent.to_path_buf(),
                 source,
             })?;
         let mut checksums = Vec::new();

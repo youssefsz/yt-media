@@ -54,8 +54,11 @@ fn run_analyze(
     scenario: &str,
     additional: &[&str],
 ) -> Result<Output, Box<dyn Error>> {
+    let data_directory = tempdir()?;
     let mut command = Command::new(cli_path()?);
     command
+        .arg("--data-dir")
+        .arg(data_directory.path())
         .args(["analyze", "https://youtu.be/dQw4w9WgXcQ", "--tool-dir"])
         .arg(tools)
         .args(additional)
@@ -182,7 +185,10 @@ fn human_and_json_modes_represent_the_same_engine_result() -> Result<(), Box<dyn
 #[test]
 fn invalid_and_unsupported_urls_fail_before_tool_resolution() -> Result<(), Box<dyn Error>> {
     let missing_tools = tempdir()?;
+    let data_directory = tempdir()?;
     let invalid = Command::new(cli_path()?)
+        .arg("--data-dir")
+        .arg(data_directory.path())
         .args([
             "analyze",
             "https://youtube.com.attacker.example/watch?v=dQw4w9WgXcQ",
@@ -195,6 +201,8 @@ fn invalid_and_unsupported_urls_fail_before_tool_resolution() -> Result<(), Box<
     assert!(String::from_utf8(invalid.stderr)?.contains("unsupported"));
 
     let cookie_option = Command::new(cli_path()?)
+        .arg("--data-dir")
+        .arg(data_directory.path())
         .args([
             "analyze",
             "https://youtu.be/dQw4w9WgXcQ",
@@ -208,6 +216,8 @@ fn invalid_and_unsupported_urls_fail_before_tool_resolution() -> Result<(), Box<
     assert!(cookie_option.stdout.is_empty());
 
     let unsupported = Command::new(cli_path()?)
+        .arg("--data-dir")
+        .arg(data_directory.path())
         .args([
             "analyze",
             "https://youtube.com/live/dQw4w9WgXcQ",
@@ -230,7 +240,10 @@ fn tool_and_analysis_failures_have_stable_codes_and_streams() -> Result<(), Box<
     assert!(!unavailable.stderr.is_empty());
 
     let tools = fixture_tool_directory()?;
+    let data_directory = tempdir()?;
     let wrong_identity = Command::new(cli_path()?)
+        .arg("--data-dir")
+        .arg(data_directory.path())
         .args(["analyze", "https://youtu.be/dQw4w9WgXcQ", "--tool-dir"])
         .arg(tools.path())
         .env("YT_MEDIA_TEST_BAD_TOOL", "deno")
@@ -269,7 +282,10 @@ fn extractor_private_and_live_results_are_unsupported() -> Result<(), Box<dyn Er
 #[test]
 fn closed_stdout_maps_to_internal_failure() -> Result<(), Box<dyn Error>> {
     let tools = fixture_tool_directory()?;
+    let data_directory = tempdir()?;
     let mut child = Command::new(cli_path()?)
+        .arg("--data-dir")
+        .arg(data_directory.path())
         .args([
             "analyze",
             "https://youtu.be/dQw4w9WgXcQ",
@@ -294,6 +310,8 @@ fn ctrl_c_cancels_and_reaps_the_analyzer_process_tree() -> Result<(), Box<dyn Er
     let directory = tempdir()?;
     let heartbeat = directory.path().join("heartbeat");
     let mut child = Command::new(cli_path()?)
+        .arg("--data-dir")
+        .arg(directory.path().join("data"))
         .args([
             "analyze",
             "https://youtu.be/dQw4w9WgXcQ",

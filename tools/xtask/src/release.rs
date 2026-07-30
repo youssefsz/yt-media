@@ -35,6 +35,12 @@ use crate::archive::extract_archive;
 
 const SIGNING_KEY_ENV: &str = "YT_MEDIA_TOOL_MANIFEST_SIGNING_KEY_HEX";
 const PUBLIC_KEY_ENV: &str = "YT_MEDIA_UPDATE_PUBLIC_KEY_HEX";
+const MAX_ARTIFACT_BYTES: u64 = 1_073_741_824;
+const MAX_INSTALLED_BYTES: u64 = 1_073_741_824;
+const MAX_COLD_START_MS: u64 = 15_000;
+const MAX_IDLE_MEMORY_BYTES: u64 = 1_073_741_824;
+const MAX_ACTIVE_DOWNLOAD_MEMORY_BYTES: u64 = 2_147_483_648;
+const MAX_FIXTURE_ANALYSIS_MS: u64 = 30_000;
 
 /// Release automation arguments.
 #[derive(Debug, Args)]
@@ -524,26 +530,81 @@ fn write_performance(arguments: &MetadataArguments) -> Result<(), ReleaseError> 
         .iter()
         .try_fold(0_u64, |total, artifact| total.checked_add(artifact.size))
         .ok_or(ReleaseError::SizeOverflow)?;
+    let installed_bytes = required_metric("YT_MEDIA_INSTALLED_BYTES")?;
+    let cold_start_ms = required_metric("YT_MEDIA_COLD_START_MS")?;
+    let idle_memory_bytes = required_metric("YT_MEDIA_IDLE_MEMORY_BYTES")?;
+    let active_download_memory_bytes = required_metric("YT_MEDIA_ACTIVE_MEMORY_BYTES")?;
+    let fixture_analysis_ms = required_metric("YT_MEDIA_ANALYSIS_MS")?;
+    for (metric, observed, maximum) in [
+        ("artifact_bytes", total_size, MAX_ARTIFACT_BYTES),
+        ("installed_bytes", installed_bytes, MAX_INSTALLED_BYTES),
+        ("cold_start_ms", cold_start_ms, MAX_COLD_START_MS),
+        (
+            "idle_memory_bytes",
+            idle_memory_bytes,
+            MAX_IDLE_MEMORY_BYTES,
+        ),
+        (
+            "active_download_memory_bytes",
+            active_download_memory_bytes,
+            MAX_ACTIVE_DOWNLOAD_MEMORY_BYTES,
+        ),
+        (
+            "fixture_analysis_ms",
+            fixture_analysis_ms,
+            MAX_FIXTURE_ANALYSIS_MS,
+        ),
+    ] {
+        require_performance_threshold(metric, observed, maximum)?;
+    }
     write_json(
         &arguments.output.join("performance.json"),
         &json!({
             "schema_version": 1,
             "target": arguments.target,
             "artifact_bytes": total_size,
-            "installed_bytes": env_u64("YT_MEDIA_INSTALLED_BYTES"),
-            "cold_start_ms": env_u64("YT_MEDIA_COLD_START_MS"),
-            "idle_memory_bytes": env_u64("YT_MEDIA_IDLE_MEMORY_BYTES"),
-            "active_download_memory_bytes": env_u64("YT_MEDIA_ACTIVE_MEMORY_BYTES"),
-            "fixture_analysis_ms": env_u64("YT_MEDIA_ANALYSIS_MS"),
+            "installed_bytes": installed_bytes,
+            "cold_start_ms": cold_start_ms,
+            "idle_memory_bytes": idle_memory_bytes,
+            "active_download_memory_bytes": active_download_memory_bytes,
+            "fixture_analysis_ms": fixture_analysis_ms,
             "thresholds": {
-                "artifact_bytes": 1_073_741_824_u64,
-                "cold_start_ms": 15_000_u64,
-                "idle_memory_bytes": 1_073_741_824_u64,
-                "active_download_memory_bytes": 2_147_483_648_u64,
-                "fixture_analysis_ms": 30_000_u64
+                "artifact_bytes": MAX_ARTIFACT_BYTES,
+                "installed_bytes": MAX_INSTALLED_BYTES,
+                "cold_start_ms": MAX_COLD_START_MS,
+                "idle_memory_bytes": MAX_IDLE_MEMORY_BYTES,
+                "active_download_memory_bytes": MAX_ACTIVE_DOWNLOAD_MEMORY_BYTES,
+                "fixture_analysis_ms": MAX_FIXTURE_ANALYSIS_MS
             }
         }),
     )
+}
+
+fn required_metric(variable: &'static str) -> Result<u64, ReleaseError> {
+    let value =
+        env::var(variable).map_err(|_| ReleaseError::PerformanceMetricMissing { variable })?;
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|source| ReleaseError::PerformanceMetricInvalid { variable, source })?;
+    if parsed == 0 {
+        return Err(ReleaseError::PerformanceMetricZero { variable });
+    }
+    Ok(parsed)
+}
+
+fn require_performance_threshold(
+    metric: &'static str,
+    observed: u64,
+    maximum: u64,
+) -> Result<(), ReleaseError> {
+    if observed > maximum {
+        return Err(ReleaseError::PerformanceThresholdExceeded {
+            metric,
+            observed,
+            maximum,
+        });
+    }
+    Ok(())
 }
 
 fn verify_staged(target: SupportedTarget, root: &Path) -> Result<(), ReleaseError> {
@@ -897,13 +958,6 @@ fn cargo_packages() -> Result<Vec<CargoPackage>, ReleaseError> {
     Ok(metadata.packages)
 }
 
-fn env_u64(name: &str) -> serde_json::Value {
-    env::var(name)
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .map_or(serde_json::Value::Null, serde_json::Value::from)
-}
-
 fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), ReleaseError> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(ReleaseError::Json)?;
     bytes.push(b'\n');
@@ -1111,6 +1165,37 @@ pub enum ReleaseError {
     /// A size calculation overflowed.
     #[error("release size calculation overflowed")]
     SizeOverflow,
+    /// A required performance sample was not provided by the platform smoke test.
+    #[error("required release performance metric {variable} is missing")]
+    PerformanceMetricMissing {
+        /// Required environment variable.
+        variable: &'static str,
+    },
+    /// A performance sample was not an unsigned integer.
+    #[error("release performance metric {variable} is invalid")]
+    PerformanceMetricInvalid {
+        /// Required environment variable.
+        variable: &'static str,
+        /// Integer parsing failure.
+        #[source]
+        source: std::num::ParseIntError,
+    },
+    /// A performance sample did not observe a usable non-zero value.
+    #[error("release performance metric {variable} did not observe a non-zero value")]
+    PerformanceMetricZero {
+        /// Required environment variable.
+        variable: &'static str,
+    },
+    /// A reviewed release performance limit was exceeded.
+    #[error("release performance metric {metric} is {observed}; reviewed maximum is {maximum}")]
+    PerformanceThresholdExceeded {
+        /// Stable metric name.
+        metric: &'static str,
+        /// Observed value.
+        observed: u64,
+        /// Inclusive reviewed maximum.
+        maximum: u64,
+    },
     /// Cargo metadata could not start.
     #[error("could not run cargo metadata")]
     CargoMetadataIo(#[source] io::Error),
@@ -1132,7 +1217,7 @@ pub enum ReleaseError {
 
 #[cfg(test)]
 mod tests {
-    use super::{ReleaseError, reject_cache_entries};
+    use super::{ReleaseError, reject_cache_entries, require_performance_threshold};
     use std::{error::Error, fs};
 
     #[test]
@@ -1170,5 +1255,18 @@ mod tests {
             ));
         }
         Ok(())
+    }
+
+    #[test]
+    fn performance_threshold_is_inclusive_and_rejects_an_overrun() {
+        assert!(require_performance_threshold("fixture", 10, 10).is_ok());
+        assert!(matches!(
+            require_performance_threshold("fixture", 11, 10),
+            Err(ReleaseError::PerformanceThresholdExceeded {
+                metric: "fixture",
+                observed: 11,
+                maximum: 10,
+            })
+        ));
     }
 }

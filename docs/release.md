@@ -98,6 +98,22 @@ Routine validation never uses a public mutable media fixture. Live YouTube smoke
 manual and opt-in. Do not commit downloaded archives, sidecars, installers, credentials,
 certificates, generated SBOMs, or build output.
 
+Every target must provide non-zero measurements before metadata generation. The reviewed inclusive
+limits are:
+
+| Metric                          | Maximum |
+| ------------------------------- | ------- |
+| Combined draft artifacts        | 1 GiB   |
+| Installed desktop application   | 1 GiB   |
+| Offline cold startup            | 15 s    |
+| Idle resident memory            | 1 GiB   |
+| Active-download resident memory | 2 GiB   |
+| Controlled fixture analysis     | 30 s    |
+
+Metadata generation fails when a measurement is missing, malformed, zero, or above its limit.
+Changing a limit requires an explicit review and corresponding evidence; required bundled tools
+must not be removed to pass an artifact-size limit.
+
 ## Primary References
 
 - [Tauri distribution](https://v2.tauri.app/distribute/) and

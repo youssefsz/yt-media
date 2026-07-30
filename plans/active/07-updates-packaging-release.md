@@ -1,12 +1,12 @@
 ---
 id: '07'
 title: Verified tool updates and cross-platform release
-status: ready
+status: in-progress
 depends_on:
   - '06'
 unlocks:
   - '08'
-started_at: null
+started_at: '2026-07-30T13:21:27Z'
 completed_at: null
 implementation_commits: []
 ---

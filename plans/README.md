@@ -38,7 +38,7 @@ state first.
 | 04  | Persistent jobs, recovery, and history           | `completed` | 03         | [Plan 04](completed/04-persistent-jobs-recovery.md)      |
 | 05  | Desktop integration and typed IPC                | `completed` | 04         | [Plan 05](completed/05-desktop-integration.md)           |
 | 06  | Desktop UI, accessibility, and motion            | `completed` | 05         | [Plan 06](completed/06-desktop-ui.md)                    |
-| 07  | Verified tool updates and cross-platform release | `ready`     | 06         | [Plan 07](backlog/07-updates-packaging-release.md)       |
+| 07  | Verified tool updates and cross-platform release | `in-progress` | 06       | [Plan 07](active/07-updates-packaging-release.md)        |
 | 08  | Developer bootstrap and local tool experience    | `blocked`   | 07         | [Plan 08](backlog/08-developer-bootstrap.md)             |
 
 ## Locked Product Decisions

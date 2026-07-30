@@ -1,7 +1,7 @@
 ---
 id: '07'
 title: Verified tool updates and cross-platform release
-status: blocked
+status: ready
 depends_on:
   - '06'
 unlocks:

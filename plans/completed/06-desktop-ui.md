@@ -1,14 +1,15 @@
 ---
 id: '06'
 title: Desktop UI, accessibility, and motion
-status: in-progress
+status: completed
 depends_on:
   - '05'
 unlocks:
   - '07'
 started_at: '2026-07-29T09:12:50Z'
-completed_at: null
-implementation_commits: []
+completed_at: '2026-07-30T12:12:06Z'
+implementation_commits:
+  - '58c4226a00fbbbe52741047463ffb99c37d52447'
 ---
 
 # Plan 06: Desktop UI, Accessibility, and Motion
@@ -137,7 +138,30 @@ Record any accepted deviation here before code depends on it.
 
 ## Completion Evidence
 
-- Completed at:
+- Completed at: `2026-07-30T12:12:06Z`
 - Implementation commits:
+  - `58c4226a00fbbbe52741047463ffb99c37d52447` — accessible desktop workspace,
+    typed controllers, native integration fixes, truthful progress, pause/resume reliability,
+    application branding, component/accessibility coverage, and visual regression evidence.
 - UI capture paths:
+  - `docs/design/plan-06-captures/new-download-{960x640,1280x800,1600x1000}-{normal,reduced}.png`
+  - `docs/design/plan-06-captures/{queue,history,settings,active-shelf,errors,interrupted}-{960x640,1280x800,1600x1000}-{normal,reduced}.png`
+  - `docs/design/plan-06-captures/startup-first-paint-1280x800.png`
 - Verification commands and results:
+  - `pnpm format:check` — passed.
+  - `pnpm lint` — passed with ESLint at zero warnings and Clippy with warnings denied.
+  - `pnpm check` — passed with zero Svelte or TypeScript errors and warnings.
+  - `pnpm test` — passed: 24 frontend tests, generated IPC drift check, and the complete Rust
+    workspace suite including desktop service, download progress, process ownership, and
+    pause/resume integration coverage.
+  - `pnpm build` — passed production frontend build.
+  - `pnpm test:visual` — all 44 Playwright cases passed across the three required sizes, normal and
+    reduced motion, keyboard/focus behavior, large text, and dark first paint.
+  - Windows x64 native release install and user acceptance passed for analyze/download workflows,
+    system Downloads default, determinate progress, repeated pause/resume, application branding,
+    and hidden child-process consoles. The tested NSIS installer was 73,151,828 bytes (69.76 MiB);
+    ignored release artifacts and sidecars were not committed.
+  - GitHub Actions run
+    `https://github.com/youssefsz/yt-media/actions/runs/30541043155` passed the full quality job and
+    native Rust checks on Windows x64, Windows ARM64, macOS Intel, macOS Apple Silicon, Linux x64,
+    and Linux ARM64.

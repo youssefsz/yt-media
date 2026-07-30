@@ -804,11 +804,22 @@ fn verify_payload_checksums(root: &Path) -> Result<(), ReleaseError> {
 
 fn reject_cache_entries(root: &Path) -> Result<(), ReleaseError> {
     for path in sorted_files(root)? {
-        let text = path.to_string_lossy().to_ascii_lowercase();
-        if [".cache", ".part", ".tmp", "update", "staging"]
-            .iter()
-            .any(|marker| text.contains(marker))
-        {
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| ReleaseError::UnexpectedArchiveLayout)?;
+        let forbidden = relative.components().any(|component| {
+            let name = component.as_os_str().to_string_lossy().to_ascii_lowercase();
+            let temporary_extension =
+                Path::new(name.as_str())
+                    .extension()
+                    .is_some_and(|extension| {
+                        extension.eq_ignore_ascii_case("part")
+                            || extension.eq_ignore_ascii_case("tmp")
+                    });
+            matches!(name.as_str(), ".cache" | "cache" | "update" | "staging")
+                || temporary_extension
+        });
+        if forbidden {
             return Err(ReleaseError::CacheArtifact { path });
         }
     }
@@ -1117,4 +1128,47 @@ pub enum ReleaseError {
         #[source]
         source: io::Error,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ReleaseError, reject_cache_entries};
+    use std::{error::Error, fs};
+
+    #[test]
+    fn cache_scan_ignores_temporary_components_above_archive_root() -> Result<(), Box<dyn Error>> {
+        let parent = tempfile::Builder::new()
+            .prefix(".tmp-release-parent")
+            .tempdir()?;
+        let root = parent.path().join("yt-media-0.1.0-test-target");
+        fs::create_dir_all(root.join("sidecars"))?;
+        fs::write(root.join("SHA256SUMS"), b"digest  file\n")?;
+        fs::write(root.join("sidecars").join("yt-dlp"), b"fixture")?;
+
+        reject_cache_entries(&root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn cache_scan_rejects_only_forbidden_archive_relative_entries() -> Result<(), Box<dyn Error>> {
+        for relative in [
+            "cache/download",
+            ".cache/download",
+            "staging/tool",
+            "update/tool",
+            "sidecars/tool.part",
+            "sidecars/tool.tmp",
+        ] {
+            let directory = tempfile::tempdir()?;
+            let path = directory.path().join(relative);
+            fs::create_dir_all(path.parent().ok_or("fixture has no parent")?)?;
+            fs::write(&path, b"fixture")?;
+
+            assert!(matches!(
+                reject_cache_entries(directory.path()),
+                Err(ReleaseError::CacheArtifact { .. })
+            ));
+        }
+        Ok(())
+    }
 }

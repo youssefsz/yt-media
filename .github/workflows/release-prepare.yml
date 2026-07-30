@@ -227,7 +227,7 @@ jobs:
           cargo xtask sidecars stage --target "$SIDECAR_TARGET" --desktop
 
       - name: Run deterministic native release tests
-        run: cargo test --workspace --all-features --locked
+        run: cargo test --workspace --all-features --locked -- --test-threads=1
 
       - name: Measure controlled release fixtures on Windows
         if: runner.os == 'Windows'

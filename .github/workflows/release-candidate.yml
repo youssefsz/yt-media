@@ -302,6 +302,9 @@ jobs:
 
       - name: Build desktop packages
         shell: bash
+        env:
+          # Preserve authenticated standalone-executable payloads during Linux AppImage assembly.
+          NO_STRIP: ${{ runner.os == 'Linux' && '1' || '' }}
         run: >-
           pnpm --filter @yt-media/desktop tauri build
           --config src-tauri/tauri.bundle.conf.json

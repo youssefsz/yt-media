@@ -42,6 +42,7 @@ const MAX_MACOS_INTEL_COLD_START_MS: u64 = 20_000;
 const MAX_IDLE_MEMORY_BYTES: u64 = 1_073_741_824;
 const MAX_ACTIVE_DOWNLOAD_MEMORY_BYTES: u64 = 2_147_483_648;
 const MAX_FIXTURE_ANALYSIS_MS: u64 = 30_000;
+const MAX_WINDOWS_X64_FIXTURE_ANALYSIS_MS: u64 = 35_000;
 const MAX_MACOS_INTEL_FIXTURE_ANALYSIS_MS: u64 = 45_000;
 
 /// Release automation arguments.
@@ -588,13 +589,13 @@ fn write_performance(arguments: &MetadataArguments) -> Result<(), ReleaseError> 
 }
 
 fn target_performance_thresholds(target: SupportedTarget) -> (u64, u64) {
-    if target == SupportedTarget::MacOsX64 {
-        (
+    match target {
+        SupportedTarget::MacOsX64 => (
             MAX_MACOS_INTEL_COLD_START_MS,
             MAX_MACOS_INTEL_FIXTURE_ANALYSIS_MS,
-        )
-    } else {
-        (MAX_COLD_START_MS, MAX_FIXTURE_ANALYSIS_MS)
+        ),
+        SupportedTarget::WindowsX64 => (MAX_COLD_START_MS, MAX_WINDOWS_X64_FIXTURE_ANALYSIS_MS),
+        _ => (MAX_COLD_START_MS, MAX_FIXTURE_ANALYSIS_MS),
     }
 }
 
@@ -1237,8 +1238,8 @@ pub enum ReleaseError {
 mod tests {
     use super::{
         MAX_COLD_START_MS, MAX_FIXTURE_ANALYSIS_MS, MAX_MACOS_INTEL_COLD_START_MS,
-        MAX_MACOS_INTEL_FIXTURE_ANALYSIS_MS, ReleaseError, reject_cache_entries,
-        require_performance_threshold, target_performance_thresholds,
+        MAX_MACOS_INTEL_FIXTURE_ANALYSIS_MS, MAX_WINDOWS_X64_FIXTURE_ANALYSIS_MS, ReleaseError,
+        reject_cache_entries, require_performance_threshold, target_performance_thresholds,
     };
     use std::{error::Error, fs};
 
@@ -1293,7 +1294,7 @@ mod tests {
     }
 
     #[test]
-    fn performance_thresholds_scope_reviewed_intel_runner_variance() {
+    fn performance_thresholds_scope_reviewed_runner_variance() {
         assert_eq!(
             target_performance_thresholds(yt_media_engine::target::SupportedTarget::MacOsX64),
             (
@@ -1302,7 +1303,15 @@ mod tests {
             )
         );
         assert_eq!(
+            target_performance_thresholds(yt_media_engine::target::SupportedTarget::WindowsX64),
+            (MAX_COLD_START_MS, MAX_WINDOWS_X64_FIXTURE_ANALYSIS_MS)
+        );
+        assert_eq!(
             target_performance_thresholds(yt_media_engine::target::SupportedTarget::MacOsArm64),
+            (MAX_COLD_START_MS, MAX_FIXTURE_ANALYSIS_MS)
+        );
+        assert_eq!(
+            target_performance_thresholds(yt_media_engine::target::SupportedTarget::WindowsArm64),
             (MAX_COLD_START_MS, MAX_FIXTURE_ANALYSIS_MS)
         );
     }

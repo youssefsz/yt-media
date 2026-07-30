@@ -55,4 +55,3 @@ if ($forbidden.Count -ne 0) {
 $size = $installer.Length
 $digest = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Output "validated_desktop_artifact=$($installer.Name) bytes=$size sha256=$digest"
-

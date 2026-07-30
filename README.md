@@ -3,9 +3,10 @@
 Local-first media tooling built around one reusable Rust engine, with a command-line interface and
 a native cross-platform desktop application.
 
-> **Status:** verified toolchain foundations, public-video analysis/download, persistent
-> engine-owned jobs, and the typed native desktop integration are implemented. The polished
-> desktop product UI remains the next milestone.
+> **Status:** the local-first engine, CLI, native desktop UI, immutable bundled tools, signed
+> managed-update system, and six-target release preparation are implemented. Public distribution
+> remains disabled pending explicit approval, project licensing, and production signing
+> credentials.
 
 ## Architecture
 
@@ -219,6 +220,12 @@ pnpm build:desktop
 
 Tauri bundles the target-qualified executables and `SHA256SUMS` inventory as resources. The engine
 verifies both checksums and exact tool identities before enabling analysis or downloads.
+
+Release preparation, protected signing, runtime update behavior, required environment
+configuration, and the six-target artifact matrix are documented in
+[`docs/release.md`](docs/release.md). The validation workflow does not publish or upload its
+ephemeral packages. Public release publication is a separate protected workflow that requires new
+explicit authorization.
 
 ### Opt-in live smoke
 

@@ -20,12 +20,18 @@ verify_tree() {
     local qualified="${tool}-${target}"
     local expected
     expected="$(expected_digest "$qualified")"
-    test -n "$expected"
+    if [[ -z "$expected" ]]; then
+      echo "desktop checksum inventory omitted ${qualified}" >&2
+      return 1
+    fi
     local matches=()
     while IFS= read -r -d '' match; do
       matches[${#matches[@]}]="$match"
     done < <(find "$root" -type f -name "$tool" -print0)
-    test "${#matches[@]}" -eq 1
+    if [[ "${#matches[@]}" -ne 1 ]]; then
+      echo "expected one packaged ${tool} below ${root}; found ${#matches[@]}" >&2
+      return 1
+    fi
     local digest_path="${matches[0]}"
     if [[ "$mode" == "signed-macos" ]]; then
       codesign --verify --strict "$digest_path"
@@ -35,7 +41,10 @@ verify_tree() {
     fi
     local found
     found="$(shasum -a 256 "$digest_path" | awk '{print $1}')"
-    test "$found" = "$expected"
+    if [[ "$found" != "$expected" ]]; then
+      echo "packaged ${tool} payload digest ${found} differs from ${expected}" >&2
+      return 1
+    fi
   done
   if find "$root" \( -name '*.part' -o -name '*.tmp' -o -name '.cache' -o -path '*/staging/*' -o -path '*/updates/*' \) -print -quit | grep -q .; then
     echo "package contains cache, partial, staging, or update state" >&2
@@ -62,8 +71,10 @@ if [[ "$target" == *apple-darwin ]]; then
 else
   deb="$(find "$bundle_directory" -type f -name '*.deb' -print -quit)"
   appimage="$(find "$bundle_directory" -type f -name '*.AppImage' -print -quit)"
-  test -n "$deb"
-  test -n "$appimage"
+  if [[ -z "$deb" || -z "$appimage" ]]; then
+    echo "expected both Debian and AppImage packages below ${bundle_directory}" >&2
+    exit 1
+  fi
   appimage="$(realpath "$appimage")"
   deb_root="${inspection_root}/deb"
   mkdir -p -- "$deb_root"

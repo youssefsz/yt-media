@@ -83,11 +83,12 @@ release matrix without publishing until explicitly authorized.
 ## Decisions and Deviations
 
 - macOS code signing adds a signature envelope after the immutable baseline inventory is generated.
-  Package inspection and runtime baseline verification therefore first require strict `codesign`
-  verification. They copy each signed sidecar into a private temporary directory, remove only the
-  signature from that copy, and compare the recovered executable payload with the pinned SHA-256
-  inventory. The signed application bundle is never modified, and version/codec/EJS probes run
-  against the original signed executable.
+  The desktop-specific inventory therefore records a canonical payload hash produced by ad-hoc
+  signing and then stripping a private staging copy; exact whole-file checksums remain authoritative
+  for CLI and tool archives. Package inspection and runtime baseline verification first require
+  strict `codesign` verification, remove the package signature only from a private copy, and
+  compare that canonical payload with the desktop inventory. The signed application bundle is
+  never modified, and version/codec/EJS probes run against the original signed executable.
 
 ## Completion Evidence
 

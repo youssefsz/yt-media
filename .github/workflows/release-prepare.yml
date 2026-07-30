@@ -298,7 +298,7 @@ jobs:
         run: |
           .github/scripts/inspect-windows-package.ps1 `
             -BundleDirectory "target/$env:SIDECAR_TARGET/release/bundle" `
-            -StageDirectory "target/sidecars/$env:SIDECAR_TARGET" `
+            -StageDirectory "apps/desktop/src-tauri/binaries" `
             -Target "$env:SIDECAR_TARGET"
 
       - name: Inspect macOS and Linux packages
@@ -307,7 +307,7 @@ jobs:
         run: |
           bash .github/scripts/inspect-unix-package.sh \
             "target/${SIDECAR_TARGET}/release/bundle" \
-            "target/sidecars/${SIDECAR_TARGET}" \
+            "apps/desktop/src-tauri/binaries" \
             "$SIDECAR_TARGET"
 
       - name: Smoke test Windows install, offline startup, persistence, and uninstall

@@ -12,6 +12,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(target_os = "macos")]
+use std::process::Command;
+
 use clap::{Args, Parser, Subcommand};
 use reqwest::{
     StatusCode,
@@ -101,7 +104,12 @@ fn run(cli: XtaskCli) -> Result<(), SidecarError> {
                             .output
                             .unwrap_or_else(|| context.repository.join(DEFAULT_STAGE_ROOT))
                     };
-                    context.stage(arguments.target, &stage_root, !arguments.desktop)
+                    context.stage(
+                        arguments.target,
+                        &stage_root,
+                        !arguments.desktop,
+                        arguments.desktop,
+                    )
                 }
             }
         }
@@ -469,6 +477,7 @@ impl SidecarContext {
         target: SupportedTarget,
         stage_root: &Path,
         append_target: bool,
+        desktop_payload: bool,
     ) -> Result<(), SidecarError> {
         let verified = self.verify(target)?;
         fs::create_dir_all(stage_root).map_err(|source| SidecarError::Io {
@@ -505,7 +514,7 @@ impl SidecarContext {
             let staged_name = tool.staged_name(target);
             let staged_path = temporary.path().join(&staged_name);
             copy_verified_file(source.as_path(), &staged_path)?;
-            let (_size, sha256) = file_identity(&staged_path)?;
+            let (_size, sha256) = staged_payload_identity(&staged_path, target, desktop_payload)?;
             checksums.push(format!("{sha256}  {staged_name}"));
         }
         checksums.sort();
@@ -788,6 +797,56 @@ fn file_identity(path: &Path) -> Result<(u64, String), SidecarError> {
         digest.update(&buffer[..length]);
     }
     Ok((metadata.len(), format!("{:x}", digest.finalize())))
+}
+
+fn staged_payload_identity(
+    path: &Path,
+    target: SupportedTarget,
+    desktop_payload: bool,
+) -> Result<(u64, String), SidecarError> {
+    #[cfg(target_os = "macos")]
+    if desktop_payload && target.triple().ends_with("-apple-darwin") {
+        let temporary = TempBuilder::new()
+            .prefix("unsigned-payload-")
+            .tempdir()
+            .map_err(|source| SidecarError::Io {
+                action: "create macOS payload normalization directory",
+                path: path.to_path_buf(),
+                source,
+            })?;
+        let file_name = path.file_name().ok_or_else(|| SidecarError::NoParent {
+            path: path.to_path_buf(),
+        })?;
+        let normalized = temporary.path().join(file_name);
+        copy_verified_file(path, &normalized)?;
+        run_codesign_normalization(&normalized, &["--force", "--sign", "-"])?;
+        run_codesign_normalization(&normalized, &["--remove-signature"])?;
+        return file_identity(&normalized);
+    }
+
+    let _ = (target, desktop_payload);
+    file_identity(path)
+}
+
+#[cfg(target_os = "macos")]
+fn run_codesign_normalization(path: &Path, arguments: &[&str]) -> Result<(), SidecarError> {
+    let output = Command::new("/usr/bin/codesign")
+        .args(arguments)
+        .arg(path)
+        .output()
+        .map_err(|source| SidecarError::Io {
+            action: "run macOS payload normalization",
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if !output.status.success() {
+        return Err(SidecarError::MacOsPayloadNormalization {
+            path: path.to_path_buf(),
+            status: output.status.code(),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn copy_verified_file(source: &Path, destination: &Path) -> Result<(), SidecarError> {
@@ -1672,6 +1731,20 @@ pub enum SidecarError {
         expected: String,
         /// Observed SHA-256.
         found: String,
+    },
+    /// macOS could not produce the canonical unsigned desktop payload.
+    #[cfg(target_os = "macos")]
+    #[error(
+        "macOS payload normalization failed for `{}` with status {status:?}: {stderr}",
+        path.display()
+    )]
+    MacOsPayloadNormalization {
+        /// Executable being normalized.
+        path: PathBuf,
+        /// Platform signer exit code.
+        status: Option<i32>,
+        /// Platform signer diagnostic.
+        stderr: String,
     },
     /// Secure extraction failed.
     #[error(transparent)]

@@ -4,7 +4,8 @@ title: Verified tool updates and cross-platform release
 status: blocked
 depends_on:
   - '06'
-unlocks: []
+unlocks:
+  - '08'
 started_at: null
 completed_at: null
 implementation_commits: []

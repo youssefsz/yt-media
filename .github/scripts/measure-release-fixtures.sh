@@ -15,7 +15,7 @@ measure_command() {
   local maximum_memory=0
   while kill -0 "$process_id" >/dev/null 2>&1; do
     local current_memory
-    current_memory="$(ps -o rss= -p "$process_id" | awk '{print $1 * 1024}')"
+    current_memory="$(ps -o rss= -p "$process_id" 2>/dev/null | awk '{print $1 * 1024}' || true)"
     if [[ -n "$current_memory" ]] && ((current_memory > maximum_memory)); then
       maximum_memory="$current_memory"
     fi

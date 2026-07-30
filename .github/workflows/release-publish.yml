@@ -51,6 +51,7 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test -f LICENSE
           test "$(gh release view "v${RELEASE_VERSION}" --json isDraft --jq .isDraft)" = true
           test "$(gh release view "v${RELEASE_VERSION}" --json targetCommitish --jq .targetCommitish)" = "$SOURCE_SHA"
           assets="$(gh release view "v${RELEASE_VERSION}" --json assets --jq '.assets[].name')"
@@ -70,6 +71,18 @@ jobs:
             grep -Fxq "${target}-sbom.spdx.json" <<<"$assets"
             grep -Fxq "${target}-provenance.intoto.json" <<<"$assets"
             grep -Fxq "${target}-performance.json" <<<"$assets"
+            case "$target" in
+              x86_64-pc-windows-msvc|aarch64-pc-windows-msvc)
+                grep -Eq "^${target}-.+setup\\.exe$" <<<"$assets"
+                ;;
+              x86_64-apple-darwin|aarch64-apple-darwin)
+                grep -Eq "^${target}-.+\\.dmg$" <<<"$assets"
+                ;;
+              x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu)
+                grep -Eq "^${target}-.+\\.deb$" <<<"$assets"
+                grep -Eq "^${target}-.+\\.AppImage$" <<<"$assets"
+                ;;
+            esac
           done
           grep -Fxq "yt-media-${RELEASE_VERSION}-x86_64-pc-windows-msvc.zip" <<<"$assets"
           grep -Fxq "yt-media-${RELEASE_VERSION}-aarch64-pc-windows-msvc.zip" <<<"$assets"
@@ -81,4 +94,4 @@ jobs:
           do
             grep -Fxq "yt-media-${RELEASE_VERSION}-${target}.tar.xz" <<<"$assets"
           done
-          gh release edit "v${RELEASE_VERSION}" --draft=false --latest=false
+          gh release edit "v${RELEASE_VERSION}" --draft=false --latest=true

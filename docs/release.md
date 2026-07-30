@@ -22,13 +22,15 @@ The release system builds and validates six native targets without making a rele
   applications, verifies notarization/signatures, produces GitHub artifact attestations, and
   uploads only validated uniquely named assets to the draft.
 - `release-publish.yml` crosses the separate protected `release-publication` environment. It checks
-  the exact source and complete six-target inventory before changing an existing draft to public.
-  Do not dispatch it without explicit publication approval.
+  the exact source, a selected repository `LICENSE`, and the complete six-target desktop/CLI
+  inventory before changing an existing draft to the latest public release. Do not dispatch it
+  without explicit publication approval.
 
 All workflow action references are immutable full commit SHAs. Release input `source_sha` must be
 the full current `origin/main` commit. Preparation uses an immutable versioned tool-asset base URL;
 the runtime channel endpoint is a repository release asset whose contents remain untrusted until
-the detached signature verifies.
+the detached signature verifies. Protected signing credentials are bound only to the validation,
+signing, or platform-package step that consumes them, never to dependency installation or tests.
 
 ## Protected Configuration
 

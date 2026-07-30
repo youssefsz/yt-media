@@ -115,20 +115,12 @@ jobs:
             runner: ubuntu-24.04-arm
             bundle: deb,appimage
     env:
-      GH_TOKEN: ${{ github.token }}
       SIDECAR_TARGET: ${{ matrix.target }}
       RELEASE_VERSION: ${{ inputs.version }}
       SOURCE_SHA: ${{ inputs.source_sha }}
       YT_MEDIA_BUILD_CREATED_AT: ${{ inputs.created_at }}
-      YT_MEDIA_TOOL_MANIFEST_SIGNING_KEY_HEX: ${{ secrets.YT_MEDIA_TOOL_MANIFEST_SIGNING_KEY_HEX }}
       YT_MEDIA_UPDATE_PUBLIC_KEY_HEX: ${{ vars.YT_MEDIA_UPDATE_PUBLIC_KEY_HEX }}
       YT_MEDIA_UPDATE_MANIFEST_URL: https://github.com/youssefsz/yt-media/releases/latest/download/tool-update-${{ matrix.target }}.manifest.json
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
     steps:
       - name: Check out exact source
@@ -138,29 +130,43 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
-      - name: Validate signing configuration without printing secrets
+      - name: Validate source and manifest signing configuration
         shell: bash
+        env:
+          YT_MEDIA_TOOL_MANIFEST_SIGNING_KEY_HEX: ${{ secrets.YT_MEDIA_TOOL_MANIFEST_SIGNING_KEY_HEX }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
           test -n "$YT_MEDIA_TOOL_MANIFEST_SIGNING_KEY_HEX"
           test -n "$YT_MEDIA_UPDATE_PUBLIC_KEY_HEX"
-          if [ "${RUNNER_OS}" = macOS ]; then
-            test -n "$APPLE_CERTIFICATE"
-            test -n "$APPLE_CERTIFICATE_PASSWORD"
-            test -n "$APPLE_SIGNING_IDENTITY"
-            test -n "$APPLE_API_ISSUER"
-            test -n "$APPLE_API_KEY"
-            test -n "$APPLE_TEAM_ID"
-          elif [ "${RUNNER_OS}" = Windows ]; then
-            test -n "${AZURE_CLIENT_ID}"
-            test -n "${AZURE_TENANT_ID}"
-            test -n "${AZURE_SUBSCRIPTION_ID}"
-            test -n "${AZURE_ARTIFACT_SIGNING_ENDPOINT}"
-            test -n "${AZURE_ARTIFACT_SIGNING_ACCOUNT}"
-            test -n "${AZURE_ARTIFACT_SIGNING_PROFILE}"
-          fi
+
+      - name: Validate Apple signing and notarization configuration
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          test -n "$APPLE_CERTIFICATE"
+          test -n "$APPLE_CERTIFICATE_PASSWORD"
+          test -n "$APPLE_SIGNING_IDENTITY"
+          test -n "$APPLE_API_ISSUER"
+          test -n "$APPLE_API_KEY"
+          test -n "$APPLE_TEAM_ID"
+          test -n "$KEYCHAIN_PASSWORD"
+          test -n "$APPLE_API_KEY_P8"
+
+      - name: Validate Azure Artifact Signing configuration
+        if: runner.os == 'Windows'
+        shell: bash
         env:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -168,6 +174,14 @@ jobs:
           AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
           AZURE_ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+        run: |
+          set -euo pipefail
+          test -n "$AZURE_CLIENT_ID"
+          test -n "$AZURE_TENANT_ID"
+          test -n "$AZURE_SUBSCRIPTION_ID"
+          test -n "$AZURE_ARTIFACT_SIGNING_ENDPOINT"
+          test -n "$AZURE_ARTIFACT_SIGNING_ACCOUNT"
+          test -n "$AZURE_ARTIFACT_SIGNING_PROFILE"
 
       - name: Install pinned Rust toolchain
         shell: bash
@@ -214,6 +228,8 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
         run: |
@@ -275,6 +291,8 @@ jobs:
 
       - name: Build CLI and immutable tool archive
         shell: bash
+        env:
+          YT_MEDIA_TOOL_MANIFEST_SIGNING_KEY_HEX: ${{ secrets.YT_MEDIA_TOOL_MANIFEST_SIGNING_KEY_HEX }}
         run: |
           cargo build --release --locked -p yt-media-cli --target "$SIDECAR_TARGET"
           cli_binary="target/${SIDECAR_TARGET}/release/yt-media"
@@ -300,7 +318,22 @@ jobs:
             --manifest "$manifest" \
             --output "${manifest%.json}.sig"
 
-      - name: Build desktop packages
+      - name: Build signed and notarized macOS desktop package
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: >-
+          pnpm --filter @yt-media/desktop tauri build
+          --config src-tauri/tauri.bundle.conf.json
+          --target "$SIDECAR_TARGET"
+          --bundles "${{ matrix.bundle }}"
+
+      - name: Build Windows or Linux desktop packages
+        if: runner.os != 'macOS'
         shell: bash
         env:
           # Preserve authenticated standalone-executable payloads during Linux AppImage assembly.
@@ -412,6 +445,8 @@ jobs:
 
       - name: Upload only to collaborator-visible draft release
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           candidate="target/release-candidate/${SIDECAR_TARGET}"
           for file in "$candidate"/*; do

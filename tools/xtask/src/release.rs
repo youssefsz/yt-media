@@ -506,7 +506,10 @@ fn write_provenance(arguments: &MetadataArguments) -> Result<(), ReleaseError> {
             "predicateType": "https://slsa.dev/provenance/v1",
             "predicate": {
                 "buildDefinition": {
-                    "buildType": "https://github.com/youssefsz/yt-media/.github/workflows/release-prepare.yml@v1",
+                    "buildType": format!(
+                        "https://github.com/youssefsz/yt-media/.github/workflows/release-prepare.yml@{}",
+                        arguments.source_sha
+                    ),
                     "externalParameters": {
                         "target": arguments.target,
                         "source_sha": arguments.source_sha,

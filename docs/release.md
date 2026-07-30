@@ -91,10 +91,12 @@ signed sidecar plus the containing application's deep, strict code-signing seal.
 application seal records the nested code identities; version, codec, and EJS probes then run against
 the original signed executables. No verification step modifies the application bundle.
 
-Linux package builds set linuxdeploy's `NO_STRIP=1`. Its default ELF stripping is unsafe for
-standalone executables such as yt-dlp whose authenticated application payload is appended to the ELF
-launcher. Debian and AppImage inspection therefore require the packaged sidecars to retain the exact
-pre-sign staging digests.
+Linux package builds set linuxdeploy's `NO_STRIP=1` and provide a narrowly scoped `PATCHELF`
+delegate. linuxdeploy otherwise strips and rewrites RPATH on every ELF executable it discovers;
+either operation can change authenticated standalone payloads. The delegate refuses only
+`--set-rpath` mutations for the four known sidecar filenames and forwards every other operation to
+the system `patchelf`. Debian and AppImage inspection still require all packaged sidecars to retain
+the exact pre-sign staging digests.
 
 ## Local Validation
 

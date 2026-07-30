@@ -286,14 +286,16 @@ jobs:
         shell: bash
         env:
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
-          # linuxdeploy strips every ELF it discovers by default, including PyInstaller-style
-          # executables whose appended payload is part of the authenticated artifact.
           NO_STRIP: ${{ runner.os == 'Linux' && '1' || '' }}
-        run: >-
-          pnpm --filter @yt-media/desktop tauri build
-          --config src-tauri/tauri.bundle.conf.json
-          --target "$SIDECAR_TARGET"
-          --bundles "${{ matrix.bundle }}"
+        run: |
+          if [ "${RUNNER_OS}" = Linux ]; then
+            export YT_MEDIA_REAL_PATCHELF="$(command -v patchelf)"
+            export PATCHELF="${GITHUB_WORKSPACE}/.github/scripts/patchelf-preserve-sidecars.sh"
+          fi
+          pnpm --filter @yt-media/desktop tauri build \
+            --config src-tauri/tauri.bundle.conf.json \
+            --target "$SIDECAR_TARGET" \
+            --bundles "${{ matrix.bundle }}"
 
       - name: Inspect Windows NSIS package
         if: runner.os == 'Windows'

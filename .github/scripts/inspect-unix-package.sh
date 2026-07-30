@@ -28,7 +28,11 @@ verify_tree() {
       continue
     fi
     local matches=()
-    if [[ "$boundary" == "cargo-output" ]]; then
+    if [[ "$boundary" == "staged-input" ]]; then
+      while IFS= read -r -d '' match; do
+        matches[${#matches[@]}]="$match"
+      done < <(find "$root" -maxdepth 1 -type f -name "$qualified" -print0)
+    elif [[ "$boundary" == "cargo-output" ]]; then
       while IFS= read -r -d '' match; do
         matches[${#matches[@]}]="$match"
       done < <(find "$root" -maxdepth 1 -type f -name "$tool" -print0)

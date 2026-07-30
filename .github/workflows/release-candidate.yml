@@ -336,13 +336,16 @@ jobs:
         if: runner.os != 'macOS'
         shell: bash
         env:
-          # Preserve authenticated standalone-executable payloads during Linux AppImage assembly.
           NO_STRIP: ${{ runner.os == 'Linux' && '1' || '' }}
-        run: >-
-          pnpm --filter @yt-media/desktop tauri build
-          --config src-tauri/tauri.bundle.conf.json
-          --target "$SIDECAR_TARGET"
-          --bundles "${{ matrix.bundle }}"
+        run: |
+          if [ "${RUNNER_OS}" = Linux ]; then
+            export YT_MEDIA_REAL_PATCHELF="$(command -v patchelf)"
+            export PATCHELF="${GITHUB_WORKSPACE}/.github/scripts/patchelf-preserve-sidecars.sh"
+          fi
+          pnpm --filter @yt-media/desktop tauri build \
+            --config src-tauri/tauri.bundle.conf.json \
+            --target "$SIDECAR_TARGET" \
+            --bundles "${{ matrix.bundle }}"
 
       - name: Authenticate to Azure with GitHub OIDC
         if: runner.os == 'Windows'

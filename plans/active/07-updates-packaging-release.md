@@ -88,9 +88,11 @@ release matrix without publishing until explicitly authorized.
   runtime validate each sidecar signature and the containing application's deep, strict seal, whose
   nested-code records bind those signed executables. The application bundle is never modified, and
   version/codec/EJS probes run against the original signed executable.
-- Linux desktop builds disable linuxdeploy's default ELF stripping. Stripping standalone
-  PyInstaller-style executables can alter or remove their appended authenticated payload, so both
-  Debian and AppImage packages must preserve and prove the exact staged sidecar digests.
+- Linux desktop builds disable linuxdeploy's default ELF stripping and use its documented
+  `PATCHELF` override to delegate all operations except RPATH mutation of the four authenticated
+  sidecar filenames. linuxdeploy otherwise rewrites every ELF in AppImage `usr/bin`, including
+  standalone yt-dlp and Deno payloads. Debian and AppImage packages must preserve and prove the
+  exact staged sidecar digests.
 
 ## Completion Evidence
 

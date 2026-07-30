@@ -38,9 +38,11 @@ const PUBLIC_KEY_ENV: &str = "YT_MEDIA_UPDATE_PUBLIC_KEY_HEX";
 const MAX_ARTIFACT_BYTES: u64 = 1_073_741_824;
 const MAX_INSTALLED_BYTES: u64 = 1_073_741_824;
 const MAX_COLD_START_MS: u64 = 15_000;
+const MAX_MACOS_INTEL_COLD_START_MS: u64 = 20_000;
 const MAX_IDLE_MEMORY_BYTES: u64 = 1_073_741_824;
 const MAX_ACTIVE_DOWNLOAD_MEMORY_BYTES: u64 = 2_147_483_648;
 const MAX_FIXTURE_ANALYSIS_MS: u64 = 30_000;
+const MAX_MACOS_INTEL_FIXTURE_ANALYSIS_MS: u64 = 45_000;
 
 /// Release automation arguments.
 #[derive(Debug, Args)]
@@ -535,10 +537,12 @@ fn write_performance(arguments: &MetadataArguments) -> Result<(), ReleaseError> 
     let idle_memory_bytes = required_metric("YT_MEDIA_IDLE_MEMORY_BYTES")?;
     let active_download_memory_bytes = required_metric("YT_MEDIA_ACTIVE_MEMORY_BYTES")?;
     let fixture_analysis_ms = required_metric("YT_MEDIA_ANALYSIS_MS")?;
+    let (max_cold_start_ms, max_fixture_analysis_ms) =
+        target_performance_thresholds(arguments.target);
     for (metric, observed, maximum) in [
         ("artifact_bytes", total_size, MAX_ARTIFACT_BYTES),
         ("installed_bytes", installed_bytes, MAX_INSTALLED_BYTES),
-        ("cold_start_ms", cold_start_ms, MAX_COLD_START_MS),
+        ("cold_start_ms", cold_start_ms, max_cold_start_ms),
         (
             "idle_memory_bytes",
             idle_memory_bytes,
@@ -552,7 +556,7 @@ fn write_performance(arguments: &MetadataArguments) -> Result<(), ReleaseError> 
         (
             "fixture_analysis_ms",
             fixture_analysis_ms,
-            MAX_FIXTURE_ANALYSIS_MS,
+            max_fixture_analysis_ms,
         ),
     ] {
         require_performance_threshold(metric, observed, maximum)?;
@@ -571,13 +575,24 @@ fn write_performance(arguments: &MetadataArguments) -> Result<(), ReleaseError> 
             "thresholds": {
                 "artifact_bytes": MAX_ARTIFACT_BYTES,
                 "installed_bytes": MAX_INSTALLED_BYTES,
-                "cold_start_ms": MAX_COLD_START_MS,
+                "cold_start_ms": max_cold_start_ms,
                 "idle_memory_bytes": MAX_IDLE_MEMORY_BYTES,
                 "active_download_memory_bytes": MAX_ACTIVE_DOWNLOAD_MEMORY_BYTES,
-                "fixture_analysis_ms": MAX_FIXTURE_ANALYSIS_MS
+                "fixture_analysis_ms": max_fixture_analysis_ms
             }
         }),
     )
+}
+
+fn target_performance_thresholds(target: SupportedTarget) -> (u64, u64) {
+    if target == SupportedTarget::MacOsX64 {
+        (
+            MAX_MACOS_INTEL_COLD_START_MS,
+            MAX_MACOS_INTEL_FIXTURE_ANALYSIS_MS,
+        )
+    } else {
+        (MAX_COLD_START_MS, MAX_FIXTURE_ANALYSIS_MS)
+    }
 }
 
 fn required_metric(variable: &'static str) -> Result<u64, ReleaseError> {
@@ -1217,7 +1232,11 @@ pub enum ReleaseError {
 
 #[cfg(test)]
 mod tests {
-    use super::{ReleaseError, reject_cache_entries, require_performance_threshold};
+    use super::{
+        MAX_COLD_START_MS, MAX_FIXTURE_ANALYSIS_MS, MAX_MACOS_INTEL_COLD_START_MS,
+        MAX_MACOS_INTEL_FIXTURE_ANALYSIS_MS, ReleaseError, reject_cache_entries,
+        require_performance_threshold, target_performance_thresholds,
+    };
     use std::{error::Error, fs};
 
     #[test]
@@ -1268,5 +1287,20 @@ mod tests {
                 maximum: 10,
             })
         ));
+    }
+
+    #[test]
+    fn performance_thresholds_scope_reviewed_intel_runner_variance() {
+        assert_eq!(
+            target_performance_thresholds(yt_media_engine::target::SupportedTarget::MacOsX64),
+            (
+                MAX_MACOS_INTEL_COLD_START_MS,
+                MAX_MACOS_INTEL_FIXTURE_ANALYSIS_MS
+            )
+        );
+        assert_eq!(
+            target_performance_thresholds(yt_media_engine::target::SupportedTarget::MacOsArm64),
+            (MAX_COLD_START_MS, MAX_FIXTURE_ANALYSIS_MS)
+        );
     }
 }

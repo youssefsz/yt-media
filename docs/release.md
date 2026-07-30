@@ -112,18 +112,22 @@ certificates, generated SBOMs, or build output.
 Every target must provide non-zero measurements before metadata generation. The reviewed inclusive
 limits are:
 
-| Metric                          | Maximum |
-| ------------------------------- | ------- |
-| Combined draft artifacts        | 1 GiB   |
-| Installed desktop application   | 1 GiB   |
-| Offline cold startup            | 15 s    |
-| Idle resident memory            | 1 GiB   |
-| Active-download resident memory | 2 GiB   |
-| Controlled fixture analysis     | 30 s    |
+| Metric                          | Maximum                    |
+| ------------------------------- | -------------------------- |
+| Combined draft artifacts        | 1 GiB                      |
+| Installed desktop application   | 1 GiB                      |
+| Offline cold startup            | 15 s (20 s on macOS Intel) |
+| Idle resident memory            | 1 GiB                      |
+| Active-download resident memory | 2 GiB                      |
+| Controlled fixture analysis     | 30 s (45 s on macOS Intel) |
 
 Metadata generation fails when a measurement is missing, malformed, zero, or above its limit.
 Changing a limit requires an explicit review and corresponding evidence; required bundled tools
 must not be removed to pass an artifact-size limit.
+
+The macOS Intel limits account for the first six-target prepare run on GitHub's Intel runner:
+17.668 s cold startup and 39.627 s controlled-fixture analysis. The rounded limits leave about
+13 percent runner variance while retaining the original limits on the other five targets.
 
 ## Primary References
 

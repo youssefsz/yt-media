@@ -105,6 +105,7 @@ fn run(cli: XtaskCli) -> Result<(), SidecarError> {
                 }
             }
         }
+        RootCommand::Release(arguments) => crate::release::run(arguments).map_err(Into::into),
     }
 }
 
@@ -119,6 +120,8 @@ struct XtaskCli {
 enum RootCommand {
     /// Fetch, build, verify, probe, or stage sidecars.
     Sidecars(SidecarsArgs),
+    /// Assemble, sign, inspect, and inventory release artifacts.
+    Release(crate::release::ReleaseArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1551,6 +1554,9 @@ fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), SidecarError> {
 /// Sidecar automation failure.
 #[derive(Debug, Error)]
 pub enum SidecarError {
+    /// Release automation failed.
+    #[error(transparent)]
+    Release(#[from] crate::release::ReleaseError),
     /// Repository layout was not recognizable.
     #[error("could not determine repository root from `{}`", path.display())]
     RepositoryRoot {

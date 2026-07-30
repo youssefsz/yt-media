@@ -8,13 +8,16 @@ publish = false
 
 [dependencies]
 clap.workspace = true
+ed25519-dalek.workspace = true
 flate2 = "1.1.9"
+hex.workspace = true
 reqwest = { version = "0.13.4", default-features = false, features = [
   "blocking",
   "rustls",
 ] }
 serde.workspace = true
 serde_json.workspace = true
+semver.workspace = true
 sha2.workspace = true
 tar = "0.4.46"
 tempfile = "3.24.0"

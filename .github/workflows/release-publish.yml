@@ -1,0 +1,84 @@
+name: Publish approved release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Existing signed draft version without a tag prefix
+        required: true
+        type: string
+      source_sha:
+        description: Full approved source commit SHA
+        required: true
+        type: string
+      confirm_publication:
+        description: Enter PUBLISH PUBLIC RELEASE to authorize publication and tag creation
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-publication-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Approve public release
+    if: inputs.confirm_publication == 'PUBLISH PUBLIC RELEASE'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    environment:
+      name: release-publication
+      deployment: false
+    permissions:
+      contents: write
+    steps:
+      - name: Check out exact approved source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify and publish the existing signed draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test "$(gh release view "v${RELEASE_VERSION}" --json isDraft --jq .isDraft)" = true
+          test "$(gh release view "v${RELEASE_VERSION}" --json targetCommitish --jq .targetCommitish)" = "$SOURCE_SHA"
+          assets="$(gh release view "v${RELEASE_VERSION}" --json assets --jq '.assets[].name')"
+          for target in \
+            x86_64-pc-windows-msvc \
+            aarch64-pc-windows-msvc \
+            x86_64-apple-darwin \
+            aarch64-apple-darwin \
+            x86_64-unknown-linux-gnu \
+            aarch64-unknown-linux-gnu
+          do
+            grep -Fxq "yt-media-tools-${RELEASE_VERSION}-${target}.zip" <<<"$assets"
+            grep -Fxq "tool-update-${target}.manifest.json" <<<"$assets"
+            grep -Fxq "tool-update-${target}.manifest.sig" <<<"$assets"
+            grep -Fxq "${target}-SHA256SUMS" <<<"$assets"
+            grep -Fxq "${target}-artifact-inventory.json" <<<"$assets"
+            grep -Fxq "${target}-sbom.spdx.json" <<<"$assets"
+            grep -Fxq "${target}-provenance.intoto.json" <<<"$assets"
+            grep -Fxq "${target}-performance.json" <<<"$assets"
+          done
+          grep -Fxq "yt-media-${RELEASE_VERSION}-x86_64-pc-windows-msvc.zip" <<<"$assets"
+          grep -Fxq "yt-media-${RELEASE_VERSION}-aarch64-pc-windows-msvc.zip" <<<"$assets"
+          for target in \
+            x86_64-apple-darwin \
+            aarch64-apple-darwin \
+            x86_64-unknown-linux-gnu \
+            aarch64-unknown-linux-gnu
+          do
+            grep -Fxq "yt-media-${RELEASE_VERSION}-${target}.tar.xz" <<<"$assets"
+          done
+          gh release edit "v${RELEASE_VERSION}" --draft=false --latest=false

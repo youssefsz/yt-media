@@ -1,0 +1,426 @@
+name: Build signed draft release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full commit SHA on main to build
+        required: true
+        type: string
+      version:
+        description: Semantic release version without a tag prefix
+        required: true
+        type: string
+      created_at:
+        description: UTC RFC 3339 build timestamp ending in Z
+        required: true
+        type: string
+      confirm_draft:
+        description: Enter BUILD PRIVATE DRAFT to authorize protected signing and a private draft release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  create-draft:
+    name: Approve signing boundary
+    if: inputs.confirm_draft == 'BUILD PRIVATE DRAFT'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    environment:
+      name: release-signing
+      deployment: false
+    permissions:
+      contents: write
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate source and create collaborator-only draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          CREATED_AT: ${{ inputs.created_at }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test "$RELEASE_VERSION" = "$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "yt-media-engine") | .version')"
+          date -u -d "$CREATED_AT" '+%Y-%m-%dT%H:%M:%SZ' >/dev/null
+          if gh release view "v${RELEASE_VERSION}" >/dev/null 2>&1; then
+            test "$(gh release view "v${RELEASE_VERSION}" --json isDraft --jq .isDraft)" = true
+          else
+            gh release create "v${RELEASE_VERSION}" \
+              --draft \
+              --target "$SOURCE_SHA" \
+              --title "YT Media ${RELEASE_VERSION}" \
+              --notes "Protected signed release candidate. Not publicly published."
+          fi
+
+  build:
+    name: Signed candidate (${{ matrix.target }})
+    needs: create-draft
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    environment:
+      name: release-signing
+      deployment: false
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+            bundle: nsis
+            msystem: UCRT64
+            msys_packages: >-
+              base-devel
+              mingw-w64-ucrt-x86_64-toolchain
+              mingw-w64-ucrt-x86_64-pkgconf
+              nasm
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+            bundle: nsis
+            msystem: CLANGARM64
+            msys_packages: >-
+              base-devel
+              mingw-w64-clang-aarch64-toolchain
+              mingw-w64-clang-aarch64-pkgconf
+              nasm
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            bundle: dmg
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            bundle: dmg
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            bundle: deb,appimage
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            bundle: deb,appimage
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SIDECAR_TARGET: ${{ matrix.target }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      YT_MEDIA_BUILD_CREATED_AT: ${{ inputs.created_at }}
+      YT_MEDIA_TOOL_MANIFEST_SIGNING_KEY_HEX: ${{ secrets.YT_MEDIA_TOOL_MANIFEST_SIGNING_KEY_HEX }}
+      YT_MEDIA_UPDATE_PUBLIC_KEY_HEX: ${{ vars.YT_MEDIA_UPDATE_PUBLIC_KEY_HEX }}
+      YT_MEDIA_UPDATE_MANIFEST_URL: https://github.com/youssefsz/yt-media/releases/latest/download/tool-update-${{ matrix.target }}.manifest.json
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate signing configuration without printing secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test -n "$YT_MEDIA_TOOL_MANIFEST_SIGNING_KEY_HEX"
+          test -n "$YT_MEDIA_UPDATE_PUBLIC_KEY_HEX"
+          if [ "${RUNNER_OS}" = macOS ]; then
+            test -n "$APPLE_CERTIFICATE"
+            test -n "$APPLE_CERTIFICATE_PASSWORD"
+            test -n "$APPLE_SIGNING_IDENTITY"
+            test -n "$APPLE_API_ISSUER"
+            test -n "$APPLE_API_KEY"
+            test -n "$APPLE_TEAM_ID"
+          elif [ "${RUNNER_OS}" = Windows ]; then
+            test -n "${AZURE_CLIENT_ID}"
+            test -n "${AZURE_TENANT_ID}"
+            test -n "${AZURE_SUBSCRIPTION_ID}"
+            test -n "${AZURE_ARTIFACT_SIGNING_ENDPOINT}"
+            test -n "${AZURE_ARTIFACT_SIGNING_ACCOUNT}"
+            test -n "${AZURE_ARTIFACT_SIGNING_PROFILE}"
+          fi
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          AZURE_ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal
+          rustup default 1.96.0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.2
+
+      - name: Install Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        with:
+          node-version: '22.20.0'
+          cache: pnpm
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Linux build and packaging dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            autoconf automake build-essential file libfuse2 \
+            libayatana-appindicator3-dev libtool librsvg2-dev libssl-dev \
+            libwebkit2gtk-4.1-dev libxdo-dev nasm patchelf pkg-config \
+            xdg-utils xvfb yasm
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install autoconf automake libtool nasm pkg-config yasm
+
+      - name: Install Windows build environment
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.30.0
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          path-type: inherit
+          install: ${{ matrix.msys_packages }}
+
+      - name: Import Apple Developer ID certificate and notarization key
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYCHAIN_PASSWORD"
+          test -n "$APPLE_API_KEY_P8"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/build.keychain"
+          security default-keychain -s "$RUNNER_TEMP/build.keychain"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$RUNNER_TEMP/build.keychain"
+          security set-keychain-settings -t 3600 -u "$RUNNER_TEMP/build.keychain"
+          security import "$RUNNER_TEMP/certificate.p12" \
+            -k "$RUNNER_TEMP/build.keychain" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$RUNNER_TEMP/build.keychain"
+          printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+          security find-identity -v -p codesigning "$RUNNER_TEMP/build.keychain"
+
+      - name: Fetch and build verified sidecars on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cargo xtask sidecars fetch --target "$SIDECAR_TARGET"
+          cargo xtask sidecars build --target "$SIDECAR_TARGET"
+          cargo xtask sidecars verify --target "$SIDECAR_TARGET"
+          cargo xtask sidecars probe --target "$SIDECAR_TARGET"
+          cargo xtask sidecars stage --target "$SIDECAR_TARGET"
+          cargo xtask sidecars stage --target "$SIDECAR_TARGET" --desktop
+
+      - name: Fetch and build verified sidecars on Windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cargo xtask sidecars fetch --target "$SIDECAR_TARGET"
+          cargo xtask sidecars build --target "$SIDECAR_TARGET"
+          cargo xtask sidecars verify --target "$SIDECAR_TARGET"
+          cargo xtask sidecars probe --target "$SIDECAR_TARGET"
+          cargo xtask sidecars stage --target "$SIDECAR_TARGET"
+          cargo xtask sidecars stage --target "$SIDECAR_TARGET" --desktop
+
+      - name: Run deterministic release tests
+        run: cargo test --workspace --all-features --locked
+
+      - name: Measure controlled release fixtures on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .github/scripts/measure-release-fixtures.ps1
+
+      - name: Measure controlled release fixtures on macOS/Linux
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash .github/scripts/measure-release-fixtures.sh
+
+      - name: Build CLI and immutable tool archive
+        shell: bash
+        run: |
+          cargo build --release --locked -p yt-media-cli --target "$SIDECAR_TARGET"
+          cli_binary="target/${SIDECAR_TARGET}/release/yt-media"
+          if [ "${RUNNER_OS}" = Windows ]; then cli_binary="${cli_binary}.exe"; fi
+          cargo xtask release cli \
+            --target "$SIDECAR_TARGET" \
+            --binary "$cli_binary" \
+            --sidecars "target/sidecars/${SIDECAR_TARGET}" \
+            --output "target/release-candidate/${SIDECAR_TARGET}" \
+            --version "$RELEASE_VERSION" \
+            --notices THIRD_PARTY_NOTICES.md \
+            --baseline-manifest sidecars/manifest.v1.json
+          cargo xtask release tools \
+            --target "$SIDECAR_TARGET" \
+            --input "target/sidecars/${SIDECAR_TARGET}" \
+            --output "target/release-candidate/${SIDECAR_TARGET}" \
+            --release-version "$RELEASE_VERSION" \
+            --minimum-app-version "$RELEASE_VERSION" \
+            --created-at "$YT_MEDIA_BUILD_CREATED_AT" \
+            --asset-base-url "https://github.com/youssefsz/yt-media/releases/download/v${RELEASE_VERSION}"
+          manifest="target/release-candidate/${SIDECAR_TARGET}/tool-update-${SIDECAR_TARGET}.manifest.json"
+          cargo xtask release sign \
+            --manifest "$manifest" \
+            --output "${manifest%.json}.sig"
+
+      - name: Build desktop packages
+        shell: bash
+        run: >-
+          pnpm --filter @yt-media/desktop tauri build
+          --config src-tauri/tauri.bundle.conf.json
+          --target "$SIDECAR_TARGET"
+          --bundles "${{ matrix.bundle }}"
+
+      - name: Authenticate to Azure with GitHub OIDC
+        if: runner.os == 'Windows'
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign Windows NSIS installer with Artifact Signing
+        if: runner.os == 'Windows'
+        uses: azure/trusted-signing-action@0d74250c661747df006298d0fb49944c10f16e03 # v0.5.1
+        with:
+          endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\target\${{ matrix.target }}\release\bundle\nsis
+          files-folder-filter: exe
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Verify Windows Authenticode signatures
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Recurse "target/$env:SIDECAR_TARGET/release/bundle/nsis" -Filter *.exe
+          if ($files.Count -eq 0) { throw 'No NSIS installer was produced.' }
+          foreach ($file in $files) {
+            $signature = Get-AuthenticodeSignature $file.FullName
+            if ($signature.Status -ne 'Valid') {
+              throw "$($file.FullName) is not validly signed: $($signature.Status)"
+            }
+          }
+
+      - name: Verify Apple notarization and Gatekeeper assessment
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          dmg="$(find "target/${SIDECAR_TARGET}/release/bundle" -name '*.dmg' -print -quit)"
+          test -n "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --context context:primary-signature -v "$dmg"
+
+      - name: Inspect Windows packaged baseline
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .github/scripts/inspect-windows-package.ps1 `
+            -BundleDirectory "target/$env:SIDECAR_TARGET/release/bundle" `
+            -StageDirectory "target/sidecars/$env:SIDECAR_TARGET" `
+            -Target "$env:SIDECAR_TARGET"
+
+      - name: Inspect macOS/Linux packaged baseline
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          bash .github/scripts/inspect-unix-package.sh \
+            "target/${SIDECAR_TARGET}/release/bundle" \
+            "target/sidecars/${SIDECAR_TARGET}" \
+            "$SIDECAR_TARGET"
+
+      - name: Smoke test signed Windows install and offline startup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .github/scripts/smoke-windows-install.ps1 `
+            -BundleDirectory "target/$env:SIDECAR_TARGET/release/bundle" `
+            -Target "$env:SIDECAR_TARGET"
+
+      - name: Smoke test signed macOS/Linux offline startup
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          bash .github/scripts/smoke-unix-package.sh \
+            "target/${SIDECAR_TARGET}/release/bundle" \
+            "$SIDECAR_TARGET"
+
+      - name: Copy platform packages and generate metadata
+        shell: bash
+        run: |
+          candidate="target/release-candidate/${SIDECAR_TARGET}"
+          mkdir -p "${candidate}/desktop"
+          find "target/${SIDECAR_TARGET}/release/bundle" -type f \
+            \( -name '*setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \) \
+            -exec cp {} "${candidate}/desktop/" \;
+          cargo xtask release metadata \
+            --target "$SIDECAR_TARGET" \
+            --artifacts "$candidate" \
+            --output "${candidate}/metadata" \
+            --source-sha "$SOURCE_SHA" \
+            --version "$RELEASE_VERSION"
+
+      - name: Attest release candidate and SBOM
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.0.0
+        with:
+          subject-path: target/release-candidate/${{ matrix.target }}/**/*
+          sbom-path: target/release-candidate/${{ matrix.target }}/metadata/sbom.spdx.json
+
+      - name: Upload only to collaborator-visible draft release
+        shell: bash
+        run: |
+          candidate="target/release-candidate/${SIDECAR_TARGET}"
+          for file in "$candidate"/*; do
+            if [ -f "$file" ]; then
+              gh release upload "v${RELEASE_VERSION}" "$file" --clobber
+            fi
+          done
+          upload_directory="${RUNNER_TEMP}/release-upload-${SIDECAR_TARGET}"
+          mkdir -p "$upload_directory"
+          find "$candidate/desktop" "$candidate/metadata" -type f -print0 |
+            while IFS= read -r -d '' file; do
+              cp "$file" "$upload_directory/${SIDECAR_TARGET}-$(basename "$file")"
+            done
+          find "$upload_directory" -type f -print0 |
+            xargs -0 gh release upload "v${RELEASE_VERSION}" --clobber

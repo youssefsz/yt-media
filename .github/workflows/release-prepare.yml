@@ -1,0 +1,348 @@
+name: Prepare release matrix
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full commit SHA on main to build
+        required: true
+        type: string
+      version:
+        description: Semantic release version without a tag prefix
+        required: true
+        default: '0.1.0'
+        type: string
+      created_at:
+        description: UTC RFC 3339 build timestamp ending in Z
+        required: true
+        type: string
+      tool_asset_base_url:
+        description: Immutable GitHub release-asset base URL ending in a versioned tools tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-prepare-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Release preflight
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Validate immutable source and inputs
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          CREATED_AT: ${{ inputs.created_at }}
+          ASSET_BASE_URL: ${{ inputs.tool_asset_base_url }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          [[ "$CREATED_AT" =~ Z$ ]]
+          [[ "$ASSET_BASE_URL" =~ ^https://github\.com/youssefsz/yt-media/releases/download/tools-v[0-9] ]]
+          test "$RELEASE_VERSION" = "$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "yt-media-engine") | .version')"
+          date -u -d "$CREATED_AT" '+%Y-%m-%dT%H:%M:%SZ' >/dev/null
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            build-essential \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.2
+
+      - name: Install Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        with:
+          node-version: '22.20.0'
+          cache: pnpm
+
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal --component clippy,rustfmt
+          rustup default 1.96.0
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run complete root quality gates
+        run: |
+          pnpm format:check
+          pnpm lint
+          pnpm check
+          pnpm test
+          pnpm build
+
+  build:
+    name: Draft artifacts (${{ matrix.target }})
+    needs: preflight
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+            bundle: nsis
+            msystem: UCRT64
+            msys_packages: >-
+              base-devel
+              mingw-w64-ucrt-x86_64-toolchain
+              mingw-w64-ucrt-x86_64-pkgconf
+              nasm
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+            bundle: nsis
+            msystem: CLANGARM64
+            msys_packages: >-
+              base-devel
+              mingw-w64-clang-aarch64-toolchain
+              mingw-w64-clang-aarch64-pkgconf
+              nasm
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            bundle: dmg
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            bundle: dmg
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            bundle: deb,appimage
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            bundle: deb,appimage
+    env:
+      SIDECAR_TARGET: ${{ matrix.target }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      YT_MEDIA_BUILD_CREATED_AT: ${{ inputs.created_at }}
+      TOOL_ASSET_BASE_URL: ${{ inputs.tool_asset_base_url }}
+      YT_MEDIA_UPDATE_PUBLIC_KEY_HEX: ${{ vars.YT_MEDIA_UPDATE_PUBLIC_KEY_HEX }}
+      YT_MEDIA_UPDATE_MANIFEST_URL: https://github.com/youssefsz/yt-media/releases/latest/download/tool-update-${{ matrix.target }}.manifest.json
+
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal
+          rustup default 1.96.0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.2
+
+      - name: Install Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        with:
+          node-version: '22.20.0'
+          cache: pnpm
+
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Linux build and packaging dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends \
+            autoconf \
+            automake \
+            build-essential \
+            file \
+            libfuse2 \
+            libayatana-appindicator3-dev \
+            libtool \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            nasm \
+            patchelf \
+            pkg-config \
+            xdg-utils \
+            xvfb \
+            yasm
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: brew install autoconf automake libtool nasm pkg-config yasm
+
+      - name: Install Windows build environment
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.30.0
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          path-type: inherit
+          install: ${{ matrix.msys_packages }}
+
+      - name: Fetch and build verified sidecars on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cargo xtask sidecars fetch --target "$SIDECAR_TARGET"
+          cargo xtask sidecars build --target "$SIDECAR_TARGET"
+          cargo xtask sidecars verify --target "$SIDECAR_TARGET"
+          cargo xtask sidecars probe --target "$SIDECAR_TARGET"
+          cargo xtask sidecars stage --target "$SIDECAR_TARGET"
+          cargo xtask sidecars stage --target "$SIDECAR_TARGET" --desktop
+
+      - name: Fetch and build verified sidecars on Windows
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          cargo xtask sidecars fetch --target "$SIDECAR_TARGET"
+          cargo xtask sidecars build --target "$SIDECAR_TARGET"
+          cargo xtask sidecars verify --target "$SIDECAR_TARGET"
+          cargo xtask sidecars probe --target "$SIDECAR_TARGET"
+          cargo xtask sidecars stage --target "$SIDECAR_TARGET"
+          cargo xtask sidecars stage --target "$SIDECAR_TARGET" --desktop
+
+      - name: Run deterministic native release tests
+        run: cargo test --workspace --all-features --locked
+
+      - name: Measure controlled release fixtures on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .github/scripts/measure-release-fixtures.ps1
+
+      - name: Measure controlled release fixtures on macOS/Linux
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash .github/scripts/measure-release-fixtures.sh
+
+      - name: Build CLI
+        run: cargo build --release --locked -p yt-media-cli --target ${{ matrix.target }}
+
+      - name: Assemble and inspect CLI archive on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cargo xtask release cli \
+            --target "$SIDECAR_TARGET" \
+            --binary "target/${SIDECAR_TARGET}/release/yt-media" \
+            --sidecars "target/sidecars/${SIDECAR_TARGET}" \
+            --output "target/release-draft/${SIDECAR_TARGET}" \
+            --version "$RELEASE_VERSION" \
+            --notices THIRD_PARTY_NOTICES.md \
+            --baseline-manifest sidecars/manifest.v1.json
+
+      - name: Assemble and inspect CLI archive on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo xtask release cli `
+            --target "$env:SIDECAR_TARGET" `
+            --binary "target/$env:SIDECAR_TARGET/release/yt-media.exe" `
+            --sidecars "target/sidecars/$env:SIDECAR_TARGET" `
+            --output "target/release-draft/$env:SIDECAR_TARGET" `
+            --version "$env:RELEASE_VERSION" `
+            --notices THIRD_PARTY_NOTICES.md `
+            --baseline-manifest sidecars/manifest.v1.json
+
+      - name: Build immutable tool archive and canonical manifest
+        shell: bash
+        run: |
+          cargo xtask release tools \
+            --target "$SIDECAR_TARGET" \
+            --input "target/sidecars/${SIDECAR_TARGET}" \
+            --output "target/release-draft/${SIDECAR_TARGET}" \
+            --release-version "$RELEASE_VERSION" \
+            --minimum-app-version "$RELEASE_VERSION" \
+            --created-at "$YT_MEDIA_BUILD_CREATED_AT" \
+            --asset-base-url "$TOOL_ASSET_BASE_URL"
+
+      - name: Build desktop packages
+        shell: bash
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
+        run: >-
+          pnpm --filter @yt-media/desktop tauri build
+          --config src-tauri/tauri.bundle.conf.json
+          --target "$SIDECAR_TARGET"
+          --bundles "${{ matrix.bundle }}"
+
+      - name: Inspect Windows NSIS package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .github/scripts/inspect-windows-package.ps1 `
+            -BundleDirectory "target/$env:SIDECAR_TARGET/release/bundle" `
+            -StageDirectory "target/sidecars/$env:SIDECAR_TARGET" `
+            -Target "$env:SIDECAR_TARGET"
+
+      - name: Inspect macOS and Linux packages
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          bash .github/scripts/inspect-unix-package.sh \
+            "target/${SIDECAR_TARGET}/release/bundle" \
+            "target/sidecars/${SIDECAR_TARGET}" \
+            "$SIDECAR_TARGET"
+
+      - name: Smoke test Windows install, offline startup, persistence, and uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .github/scripts/smoke-windows-install.ps1 `
+            -BundleDirectory "target/$env:SIDECAR_TARGET/release/bundle" `
+            -Target "$env:SIDECAR_TARGET"
+
+      - name: Smoke test macOS/Linux offline startup and persistence
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          bash .github/scripts/smoke-unix-package.sh \
+            "target/${SIDECAR_TARGET}/release/bundle" \
+            "$SIDECAR_TARGET"
+
+      - name: Copy desktop packages into ephemeral draft directory
+        shell: bash
+        run: |
+          mkdir -p "target/release-draft/${SIDECAR_TARGET}/desktop"
+          find "target/${SIDECAR_TARGET}/release/bundle" -type f \
+            \( -name '*setup.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \) \
+            -exec cp {} "target/release-draft/${SIDECAR_TARGET}/desktop/" \;
+
+      - name: Generate release integrity metadata
+        shell: bash
+        run: |
+          cargo xtask release metadata \
+            --target "$SIDECAR_TARGET" \
+            --artifacts "target/release-draft/${SIDECAR_TARGET}" \
+            --output "target/release-draft/${SIDECAR_TARGET}/metadata" \
+            --source-sha "$SOURCE_SHA" \
+            --version "$RELEASE_VERSION"
+
+      - name: Print validated evidence
+        shell: bash
+        run: |
+          find "target/release-draft/${SIDECAR_TARGET}/metadata" -type f -print -exec cat {} \;

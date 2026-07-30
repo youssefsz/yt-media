@@ -87,6 +87,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Run complete root quality gates
+        env:
+          RUST_TEST_THREADS: '1'
         run: |
           pnpm format:check
           pnpm lint

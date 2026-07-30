@@ -82,7 +82,12 @@ release matrix without publishing until explicitly authorized.
 
 ## Decisions and Deviations
 
-Record any accepted deviation here before code depends on it.
+- macOS code signing adds a signature envelope after the immutable baseline inventory is generated.
+  Package inspection and runtime baseline verification therefore first require strict `codesign`
+  verification. They copy each signed sidecar into a private temporary directory, remove only the
+  signature from that copy, and compare the recovered executable payload with the pinned SHA-256
+  inventory. The signed application bundle is never modified, and version/codec/EJS probes run
+  against the original signed executable.
 
 ## Completion Evidence
 

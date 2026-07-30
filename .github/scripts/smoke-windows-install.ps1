@@ -36,6 +36,27 @@ $env:HTTP_PROXY = 'http://127.0.0.1:9'
 $env:HTTPS_PROXY = 'http://127.0.0.1:9'
 $env:ALL_PROXY = 'http://127.0.0.1:9'
 $env:NO_PROXY = ''
+
+$toolProbes = @(
+    @{ Name = 'yt-dlp.exe'; Arguments = @('--no-update', '--version') },
+    @{ Name = 'ffmpeg.exe'; Arguments = @('-hide_banner', '-version') },
+    @{ Name = 'ffprobe.exe'; Arguments = @('-hide_banner', '-version') },
+    @{ Name = 'deno.exe'; Arguments = @('--version') }
+)
+foreach ($probe in $toolProbes) {
+    $matches = @(Get-ChildItem -LiteralPath $installRoot -Recurse -File -Filter $probe.Name)
+    if ($matches.Count -ne 1) {
+        throw "Expected exactly one installed $($probe.Name), found $($matches.Count)"
+    }
+    [string[]]$probeArguments = $probe.Arguments
+    $output = & $matches[0].FullName @probeArguments 2>&1
+    if ($LASTEXITCODE -ne 0 -or $null -eq $output) {
+        throw "Installed $($probe.Name) could not report its version offline."
+    }
+    $firstLine = @($output)[0].ToString()
+    Write-Output "offline_bundled_tool=$($probe.Name) version=$firstLine"
+}
+
 $started = [DateTimeOffset]::UtcNow
 $process = Start-Process -FilePath $application.FullName -PassThru
 $database = $null

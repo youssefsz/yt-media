@@ -19,6 +19,36 @@ export HTTPS_PROXY='http://127.0.0.1:9'
 export ALL_PROXY='http://127.0.0.1:9'
 export NO_PROXY=''
 
+probe_packaged_tools() {
+  local root="$1"
+  for tool in yt-dlp ffmpeg ffprobe deno; do
+    local matches=()
+    while IFS= read -r -d '' match; do
+      matches[${#matches[@]}]="$match"
+    done < <(find "$root" -type f -name "$tool" -print0)
+    test "${#matches[@]}" -eq 1
+    local output=''
+    case "$tool" in
+      yt-dlp)
+        output="$("${matches[0]}" --no-update --version 2>&1)"
+        ;;
+      ffmpeg)
+        output="$("${matches[0]}" -hide_banner -version 2>&1)"
+        ;;
+      ffprobe)
+        output="$("${matches[0]}" -hide_banner -version 2>&1)"
+        ;;
+      deno)
+        output="$("${matches[0]}" --version 2>&1)"
+        ;;
+    esac
+    test -n "$output"
+    local first_line=''
+    IFS= read -r first_line <<<"$output"
+    echo "offline_bundled_tool=${tool} version=${first_line}"
+  done
+}
+
 cleanup_process() {
   if [[ -n "${application_pid:-}" ]]; then
     kill "$application_pid" >/dev/null 2>&1 || true
@@ -44,6 +74,7 @@ if [[ "$target" == *apple-darwin ]]; then
       -print -quit
   )"
   test -n "$application"
+  probe_packaged_tools "${app_bundle}/Contents/MacOS"
   installed_bytes="$(du -sk "$app_bundle" | awk '{print $1 * 1024}')"
   "$application" >"${smoke_root}/stdout.log" 2>"${smoke_root}/stderr.log" &
   application_pid=$!
@@ -53,6 +84,13 @@ else
   artifact="${smoke_root}/$(basename "$source_artifact")"
   cp "$source_artifact" "$artifact"
   chmod 755 "$artifact"
+  probe_root="${smoke_root}/probe"
+  mkdir -p -- "$probe_root"
+  (
+    cd "$probe_root"
+    "$artifact" --appimage-extract >/dev/null
+  )
+  probe_packaged_tools "${probe_root}/squashfs-root"
   installed_bytes="$(stat -c '%s' "$artifact")"
   APPIMAGE_EXTRACT_AND_RUN=1 xvfb-run -a "$artifact" >"${smoke_root}/stdout.log" 2>"${smoke_root}/stderr.log" &
   application_pid=$!

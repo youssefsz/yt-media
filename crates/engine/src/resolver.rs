@@ -204,14 +204,14 @@ impl VerifiedToolSet {
                 .remove(&staged_name)
                 .ok_or(ToolSetVerificationError::StagedToolMissing { tool })?;
             let path = confined_path(&root, &tool.executable_name(target)).await?;
-            let size = tokio::fs::metadata(&path)
-                .await
-                .map_err(|source| ToolSetVerificationError::Inspect {
-                    path: path.clone(),
-                    source,
-                })?
-                .len();
-            verify_file_digest(tool, &path, size, &expected_hash).await?;
+            verify_external_file_digest(
+                runner.as_ref(),
+                tool,
+                &path,
+                &expected_hash,
+                cancellation.child_token(),
+            )
+            .await?;
             let executable_path = validate_executable_async(path).await?;
             probe_tool(
                 runner.as_ref(),
@@ -531,6 +531,104 @@ async fn verify_file_digest(
             tool,
             expected: expected_hash.to_owned(),
             found,
+        });
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn verify_external_file_digest(
+    _runner: &dyn ProcessRunner,
+    tool: Tool,
+    path: &Path,
+    expected_hash: &str,
+    _cancellation: CancellationToken,
+) -> Result<(), ToolSetVerificationError> {
+    let size = tokio::fs::metadata(path)
+        .await
+        .map_err(|source| ToolSetVerificationError::Inspect {
+            path: path.to_path_buf(),
+            source,
+        })?
+        .len();
+    verify_file_digest(tool, path, size, expected_hash).await
+}
+
+#[cfg(target_os = "macos")]
+async fn verify_external_file_digest(
+    runner: &dyn ProcessRunner,
+    tool: Tool,
+    path: &Path,
+    expected_hash: &str,
+    cancellation: CancellationToken,
+) -> Result<(), ToolSetVerificationError> {
+    run_codesign(
+        runner,
+        tool,
+        ["--verify", "--strict"],
+        path,
+        cancellation.child_token(),
+    )
+    .await?;
+
+    let temporary_directory = tokio::task::spawn_blocking(tempfile::tempdir)
+        .await
+        .map_err(ToolSetVerificationError::TemporaryDirectoryTask)?
+        .map_err(ToolSetVerificationError::TemporaryDirectory)?;
+    let unsigned_copy = temporary_directory
+        .path()
+        .join(tool.executable_name(SupportedTarget::current()?));
+    tokio::fs::copy(path, &unsigned_copy)
+        .await
+        .map_err(|source| ToolSetVerificationError::CopyForVerification {
+            source_path: path.to_path_buf(),
+            destination_path: unsigned_copy.clone(),
+            source,
+        })?;
+    run_codesign(
+        runner,
+        tool,
+        ["--remove-signature"],
+        &unsigned_copy,
+        cancellation,
+    )
+    .await?;
+
+    let unsigned_size = tokio::fs::metadata(&unsigned_copy)
+        .await
+        .map_err(|source| ToolSetVerificationError::Inspect {
+            path: unsigned_copy.clone(),
+            source,
+        })?
+        .len();
+    verify_file_digest(tool, &unsigned_copy, unsigned_size, expected_hash).await
+}
+
+#[cfg(target_os = "macos")]
+async fn run_codesign<const N: usize>(
+    runner: &dyn ProcessRunner,
+    tool: Tool,
+    arguments: [&str; N],
+    path: &Path,
+    cancellation: CancellationToken,
+) -> Result<(), ToolSetVerificationError> {
+    let output_limit = OutputLimit::new(PROBE_MAX_BYTES, PROBE_MAX_LINES)
+        .map_err(ToolSetVerificationError::Spec)?;
+    let spec = ProcessSpec::new("/usr/bin/codesign")
+        .arguments(arguments)
+        .argument(path.as_os_str())
+        .timeout(PROBE_TIMEOUT)
+        .output_limit(output_limit);
+    let output = runner.run(spec, cancellation).await.map_err(|source| {
+        ToolSetVerificationError::MacOsSignatureProcess {
+            tool,
+            source: Box::new(source),
+        }
+    })?;
+    if !output.status.success {
+        return Err(ToolSetVerificationError::MacOsSignatureRejected {
+            tool,
+            output: Box::new(output),
         });
     }
     Ok(())
@@ -900,6 +998,53 @@ pub enum ToolSetVerificationError {
     /// The blocking path-validation task failed.
     #[error("executable path validation task failed")]
     ValidationTask(#[source] tokio::task::JoinError),
+    /// Creating a private temporary directory failed.
+    #[cfg(target_os = "macos")]
+    #[error("could not create a private directory for macOS signature verification")]
+    TemporaryDirectory(#[source] std::io::Error),
+    /// The blocking temporary-directory task failed.
+    #[cfg(target_os = "macos")]
+    #[error("macOS signature verification directory task failed")]
+    TemporaryDirectoryTask(#[source] tokio::task::JoinError),
+    /// Copying a signed executable for non-destructive payload verification failed.
+    #[cfg(target_os = "macos")]
+    #[error(
+        "could not copy signed tool from `{}` to `{}` for verification",
+        source_path.display(),
+        destination_path.display()
+    )]
+    CopyForVerification {
+        /// Signed executable in the immutable application bundle.
+        source_path: PathBuf,
+        /// Private copy used only for signature removal and hashing.
+        destination_path: PathBuf,
+        /// Copy failure.
+        #[source]
+        source: std::io::Error,
+    },
+    /// Invoking the platform signature verifier failed.
+    #[cfg(target_os = "macos")]
+    #[error("could not verify the macOS signature envelope for `{tool}`")]
+    MacOsSignatureProcess {
+        /// Affected tool.
+        tool: Tool,
+        /// Process execution failure.
+        #[source]
+        source: Box<ProcessError>,
+    },
+    /// The platform signature verifier rejected a packaged executable.
+    #[cfg(target_os = "macos")]
+    #[error("macOS signature verification rejected `{tool}`")]
+    MacOsSignatureRejected {
+        /// Affected tool.
+        tool: Tool,
+        /// Complete bounded verifier output.
+        output: Box<ProcessOutput>,
+    },
+    /// The platform signature process specification was invalid.
+    #[cfg(target_os = "macos")]
+    #[error("invalid macOS signature verification process")]
+    Spec(#[source] crate::process::ProcessSpecError),
     /// A tool version probe failed.
     #[error(transparent)]
     Probe(Box<ToolProbeError>),

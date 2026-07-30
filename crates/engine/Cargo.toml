@@ -9,16 +9,24 @@ rust-version.workspace = true
 async-trait.workspace = true
 command-group.workspace = true
 directories = "6.0.0"
+ed25519-dalek.workspace = true
 fs2 = "0.4.3"
+hex.workspace = true
 rusqlite = { version = "0.40.1", default-features = false, features = ["bundled"] }
+semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_json_canonicalizer.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+time.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 url.workspace = true
 uuid = { version = "1.24.0", features = ["v7", "serde"] }
+zip = { version = "8.1.0", default-features = false, features = [
+  "deflate-flate2-zlib-rs",
+] }
 
 [dev-dependencies]
 proptest = "1.11.0"

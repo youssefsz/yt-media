@@ -29,7 +29,7 @@ pub const IPC_SCHEMA_VERSION: u16 = 1;
 pub const JOB_EVENT_NAME: &str = "job-event-v1";
 
 /// Command names registered by the native shell and consumed by the typed client.
-pub const COMMAND_NAMES: [&str; 17] = [
+pub const COMMAND_NAMES: [&str; 19] = [
     "bootstrap",
     "analyze",
     "cancel_analysis",
@@ -47,6 +47,8 @@ pub const COMMAND_NAMES: [&str; 17] = [
     "choose_destination",
     "reveal_output",
     "tool_status",
+    "check_for_tool_updates",
+    "reset_tool_updates",
 ];
 
 /// Stable error codes exposed to the webview.
@@ -75,6 +77,8 @@ pub enum IpcErrorCodeDto {
     DestinationSelectionFailed,
     /// A completed output is unavailable or cannot be revealed.
     RevealFailed,
+    /// A verified update check or reset could not be completed.
+    UpdateUnavailable,
     /// An unexpected native failure occurred.
     Internal,
 }
@@ -1018,6 +1022,31 @@ pub struct UpdateSettingsRequestDto {
     pub last_output: Option<OutputSelectionDto>,
 }
 
+/// Stable result category for a signed tool update check.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum UpdateCheckStatusDto {
+    /// A background attempt was already made within the last 24 hours.
+    SkippedRecently,
+    /// The active set is current.
+    Current,
+    /// A newer signed set exists but was not installed.
+    Available,
+    /// A newer set was verified, health checked, and activated.
+    Installed,
+}
+
+/// Result of a signed tool update operation.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+pub struct UpdateCheckResultDto {
+    /// IPC schema version.
+    pub schema_version: u16,
+    /// Stable outcome.
+    pub status: UpdateCheckStatusDto,
+    /// Trusted semantic version, when a manifest was checked.
+    pub version: Option<String>,
+}
+
 /// Native folder selection result.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct DestinationSelectionDto {
@@ -1075,6 +1104,8 @@ pub fn generated_typescript() -> String {
         SettingsDto::decl(&config),
         DefaultDestinationUpdateDto::decl(&config),
         UpdateSettingsRequestDto::decl(&config),
+        UpdateCheckStatusDto::decl(&config),
+        UpdateCheckResultDto::decl(&config),
         DestinationSelectionDto::decl(&config),
         ActionResultDto::decl(&config),
         BootstrapStateDto::decl(&config),

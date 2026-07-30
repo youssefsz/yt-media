@@ -452,6 +452,7 @@ impl DownloadService {
                 "--ignore-config",
                 "--no-config-locations",
                 "--no-plugin-dirs",
+                "--no-update",
                 "--no-playlist",
                 "--no-js-runtimes",
                 "--js-runtimes",

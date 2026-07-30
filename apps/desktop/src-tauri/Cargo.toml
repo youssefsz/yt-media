@@ -19,6 +19,9 @@ doc = false
 tauri-build.workspace = true
 
 [dependencies]
+async-trait.workspace = true
+reqwest.workspace = true
+semver.workspace = true
 serde.workspace = true
 tauri.workspace = true
 tauri-plugin-dialog.workspace = true
@@ -30,7 +33,6 @@ ts-rs.workspace = true
 yt-media-engine = { path = "../../../crates/engine" }
 
 [dev-dependencies]
-async-trait.workspace = true
 serde_json.workspace = true
 tempfile = "3.24.0"
 

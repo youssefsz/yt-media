@@ -16,6 +16,8 @@
   export let onChooseDefaultDestination: () => Promise<void>;
   export let onClearDefaultDestination: () => Promise<void>;
   export let onRefreshTools: () => Promise<void>;
+  export let onCheckForToolUpdates: () => Promise<void>;
+  export let onResetToolUpdates: () => Promise<void>;
 
   const toolLabel = (tool: ToolStatusDto['tool']): string =>
     tool === 'yt-dlp' ? 'yt-dlp' : tool[0]?.toUpperCase() + tool.slice(1);
@@ -100,17 +102,36 @@
         <div class="setting-row">
           <div>
             <label for="update-preference">Verified tool updates</label>
+            <p>Signed complete tool sets only. The bundled baseline is never replaced.</p>
           </div>
-          <select
-            id="update-preference"
-            value={settings.update_preference}
-            disabled={status === 'saving'}
-            onchange={(event) => updatePreference(event.currentTarget.value)}
-          >
-            <option value="notify">Notify me</option>
-            <option value="automatic">Automatic</option>
-            <option value="disabled">Disabled</option>
-          </select>
+          <div class="setting-control update-setting-control">
+            <select
+              id="update-preference"
+              value={settings.update_preference}
+              disabled={status === 'saving'}
+              onchange={(event) => updatePreference(event.currentTarget.value)}
+            >
+              <option value="notify">Notify me</option>
+              <option value="automatic">Automatic</option>
+              <option value="disabled">Disabled</option>
+            </select>
+            <div class="update-actions">
+              <button
+                type="button"
+                disabled={busyActions.includes('check-tool-updates')}
+                onclick={() => void onCheckForToolUpdates()}
+              >
+                {busyActions.includes('check-tool-updates') ? 'Checking…' : 'Check now'}
+              </button>
+              <button
+                type="button"
+                disabled={busyActions.includes('reset-tool-updates')}
+                onclick={() => void onResetToolUpdates()}
+              >
+                {busyActions.includes('reset-tool-updates') ? 'Resetting…' : 'Reset to bundled'}
+              </button>
+            </div>
+          </div>
         </div>
       </section>
 

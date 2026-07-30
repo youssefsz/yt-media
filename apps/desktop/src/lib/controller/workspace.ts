@@ -171,6 +171,8 @@ export interface WorkspaceController {
   chooseDefaultDestination(): Promise<void>;
   clearDefaultDestination(): Promise<void>;
   refreshTools(): Promise<void>;
+  checkForToolUpdates(): Promise<void>;
+  resetToolUpdates(): Promise<void>;
   toggleShelf(): void;
 }
 
@@ -676,6 +678,53 @@ export const createWorkspaceController = (
     }
   };
 
+  const checkForToolUpdates = async (): Promise<void> => {
+    setBusy('check-tool-updates', true);
+    try {
+      const result = await client.checkForToolUpdates();
+      const version = result.version === null ? '' : ` ${result.version}`;
+      const announcement =
+        result.status === 'installed'
+          ? `Verified tool update${version} installed. Restart YT Media to use it.`
+          : result.status === 'available'
+            ? `Verified tool update${version} is available.`
+            : result.status === 'current'
+              ? `Verified tools${version} are current.`
+              : 'A recent background update check already completed.';
+      update((state) => ({ ...state, settingsError: null, announcement }));
+    } catch (error: unknown) {
+      const updateError = normalizeError(error, 'Verified tool updates could not be checked.');
+      update((state) => ({
+        ...state,
+        settingsError: updateError,
+        announcement: updateError.message,
+      }));
+    } finally {
+      setBusy('check-tool-updates', false);
+    }
+  };
+
+  const resetToolUpdates = async (): Promise<void> => {
+    setBusy('reset-tool-updates', true);
+    try {
+      await client.resetToolUpdates();
+      update((state) => ({
+        ...state,
+        settingsError: null,
+        announcement: 'Managed tools were removed. Restart YT Media to use the bundled baseline.',
+      }));
+    } catch (error: unknown) {
+      const updateError = normalizeError(error, 'Managed tools could not be reset.');
+      update((state) => ({
+        ...state,
+        settingsError: updateError,
+        announcement: updateError.message,
+      }));
+    } finally {
+      setBusy('reset-tool-updates', false);
+    }
+  };
+
   return {
     state: { subscribe: store.subscribe },
     connect,
@@ -756,6 +805,8 @@ export const createWorkspaceController = (
     chooseDefaultDestination,
     clearDefaultDestination: () => updateSettings(settingsRequest({ action: 'clear' })),
     refreshTools,
+    checkForToolUpdates,
+    resetToolUpdates,
     toggleShelf: () => {
       update((state) => ({ ...state, shelfExpanded: !state.shelfExpanded }));
     },

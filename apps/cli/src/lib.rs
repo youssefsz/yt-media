@@ -26,7 +26,9 @@ use yt_media_engine::{
         EngineSettings, JobErrorClass, JobQueue, JobRecord, JobState, QueueConcurrency, QueueError,
         SettingsPatch, UpdatePreference,
     },
-    resolver::{ResolutionMode, ToolResolutionConfig, ToolResolutionError, ToolResolver},
+    resolver::{
+        ResolutionMode, ToolResolutionConfig, ToolResolutionError, ToolResolver, VerifiedToolSet,
+    },
     target::SupportedTarget,
     tool::Tool,
 };
@@ -1167,8 +1169,11 @@ async fn resolve_analysis_tools(
     if let Some(directory) = tool_directory {
         config.explicit_overrides = analysis_tool_paths(directory, target);
     } else {
-        config.mode = ResolutionMode::Development;
-        config.path_environment = std::env::var_os("PATH");
+        config.bundled_baseline = bundled_cli_tools(target, cancellation.child_token()).await?;
+        if config.bundled_baseline.is_none() {
+            config.mode = ResolutionMode::Development;
+            config.path_environment = std::env::var_os("PATH");
+        }
     }
     let resolver = ToolResolver::default();
     let yt_dlp = resolve_one(
@@ -1212,8 +1217,11 @@ async fn resolve_download_tools(
             .map(|tool| (tool, directory.join(tool.executable_name(target))))
             .collect();
     } else {
-        config.mode = ResolutionMode::Development;
-        config.path_environment = std::env::var_os("PATH");
+        config.bundled_baseline = bundled_cli_tools(target, cancellation.child_token()).await?;
+        if config.bundled_baseline.is_none() {
+            config.mode = ResolutionMode::Development;
+            config.path_environment = std::env::var_os("PATH");
+        }
     }
     let resolver = ToolResolver::default();
     let yt_dlp = resolve_one(
@@ -1250,6 +1258,34 @@ async fn resolve_download_tools(
     .await?;
     DownloadTools::from_resolved(yt_dlp, ffmpeg, ffprobe, deno)
         .map_err(|error| CommandFailure::Internal(error.to_string()))
+}
+
+async fn bundled_cli_tools(
+    target: SupportedTarget,
+    cancellation: CancellationToken,
+) -> Result<Option<VerifiedToolSet>, CommandFailure> {
+    let executable = std::env::current_exe()
+        .map_err(|error| CommandFailure::Internal(format!("could not locate CLI: {error}")))?;
+    let parent = executable.parent().ok_or_else(|| {
+        CommandFailure::Internal("the CLI executable path has no parent directory".to_owned())
+    })?;
+    let directory = parent.join("sidecars");
+    if !directory.is_dir() {
+        return Ok(None);
+    }
+    VerifiedToolSet::verify_staged(
+        target,
+        directory,
+        std::sync::Arc::new(yt_media_engine::process::TokioProcessRunner),
+        cancellation,
+    )
+    .await
+    .map(Some)
+    .map_err(|error| {
+        CommandFailure::UnavailableTools(format!(
+            "the bundled CLI tool set failed verification: {error}"
+        ))
+    })
 }
 
 async fn resolve_one(

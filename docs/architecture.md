@@ -159,8 +159,23 @@ verified bundled baseline, then development-only `PATH`. Production resolution n
 `PATH`. Downloaded artifacts, build outputs, receipts, and staging directories are ignored; only
 manifests, build definitions, checksums, and provenance are committed.
 
-The manually dispatched six-runner workflow uploads private workflow artifacts. It never creates a
-public release. Distribution license review remains a separate release decision.
+Managed updates are complete target-specific sets authenticated as RFC 8785 canonical manifests
+with detached Ed25519 signatures. The engine owns the 24-hour background schedule, compatibility
+policy, confined extraction, executable and capability health probes, atomic activation,
+last-known-good rollback, startup-failure recovery, and reset to the immutable bundle. The desktop
+shell provides a bounded HTTPS adapter and typed manual intent; neither Tauri nor Svelte decides
+which executable bytes are trusted. yt-dlp always receives `--no-update`.
+
+The manually dispatched preparation workflow validates six native runners without uploading its
+ephemeral artifacts or creating a release. Distribution license review remains a separate release
+decision.
+
+Release preparation, protected signing, and public publication are independent privilege
+boundaries. Preparation is read-only and keeps outputs on ephemeral runners. Signing requires the
+`release-signing` environment and produces only a collaborator-visible draft. Publication requires
+the separate `release-publication` environment and explicit confirmation. See
+[`docs/release.md`](release.md) and
+[`ADR 0006`](decisions/0006-signed-tool-updates-and-release-boundaries.md).
 
 The analyze CLI opts into development-only `PATH` resolution only when no `--tool-dir` is supplied.
 Every discovered executable is canonicalized and identity-probed against the pinned baseline before

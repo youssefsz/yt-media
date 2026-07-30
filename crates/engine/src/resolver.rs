@@ -36,6 +36,21 @@ pub struct VerifiedToolSet {
     paths: BTreeMap<Tool, ExecutablePath>,
 }
 
+/// One executable admitted by a signed managed-update inventory.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedToolEntry {
+    /// Stable executable identity.
+    pub tool: Tool,
+    /// Exact version expected from the bounded identity probe.
+    pub version: String,
+    /// Safe relative path below the set root.
+    pub relative_path: String,
+    /// Exact executable byte length.
+    pub size: u64,
+    /// Lowercase SHA-256 digest.
+    pub sha256: String,
+}
+
 impl VerifiedToolSet {
     /// Verifies hashes, sizes, paths, build receipts, and version identities below a root.
     ///
@@ -66,7 +81,8 @@ impl VerifiedToolSet {
                 executable_path.as_path(),
                 cancellation.child_token(),
             )
-            .await?;
+            .await
+            .map_err(|error| ToolSetVerificationError::Probe(Box::new(error)))?;
             paths.insert(tool_manifest.tool, executable_path);
         }
 
@@ -154,11 +170,102 @@ impl VerifiedToolSet {
                 executable_path.as_path(),
                 cancellation.child_token(),
             )
-            .await?;
+            .await
+            .map_err(|error| ToolSetVerificationError::Probe(Box::new(error)))?;
             paths.insert(tool, executable_path);
         }
         if !checksums.is_empty() {
             return Err(ToolSetVerificationError::InvalidChecksumInventory);
+        }
+        Ok(Self { target, paths })
+    }
+
+    /// Verifies Tauri external binaries beside the application executable against the qualified
+    /// build-time checksum inventory stored in application resources.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed inventory, path, digest, or baseline identity failure.
+    pub async fn verify_external(
+        target: SupportedTarget,
+        executable_root: impl Into<PathBuf>,
+        checksum_path: impl Into<PathBuf>,
+        runner: Arc<dyn ProcessRunner>,
+        cancellation: CancellationToken,
+    ) -> Result<Self, ToolSetVerificationError> {
+        let root = canonical_directory(executable_root.into()).await?;
+        let checksum_path = checksum_path.into();
+        let document = read_checksum_inventory(&checksum_path).await?;
+        let mut checksums = parse_checksum_inventory(&document)?;
+        let mut paths = BTreeMap::new();
+        for tool in Tool::ALL {
+            let staged_name = tool.staged_name(target);
+            let expected_hash = checksums
+                .remove(&staged_name)
+                .ok_or(ToolSetVerificationError::StagedToolMissing { tool })?;
+            let path = confined_path(&root, &tool.executable_name(target)).await?;
+            let size = tokio::fs::metadata(&path)
+                .await
+                .map_err(|source| ToolSetVerificationError::Inspect {
+                    path: path.clone(),
+                    source,
+                })?
+                .len();
+            verify_file_digest(tool, &path, size, &expected_hash).await?;
+            let executable_path = validate_executable_async(path).await?;
+            probe_tool(
+                runner.as_ref(),
+                tool,
+                tool.baseline_version(),
+                executable_path.as_path(),
+                cancellation.child_token(),
+            )
+            .await
+            .map_err(|error| ToolSetVerificationError::Probe(Box::new(error)))?;
+            paths.insert(tool, executable_path);
+        }
+        if !checksums.is_empty() {
+            return Err(ToolSetVerificationError::InvalidChecksumInventory);
+        }
+        Ok(Self { target, paths })
+    }
+
+    /// Verifies a complete signed managed-update inventory below an application-owned root.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed error for incomplete inventories, escaped paths, digest mismatches, or
+    /// executable identity failures.
+    pub async fn verify_entries(
+        target: SupportedTarget,
+        root: impl Into<PathBuf>,
+        entries: &[VerifiedToolEntry],
+        runner: Arc<dyn ProcessRunner>,
+        cancellation: CancellationToken,
+    ) -> Result<Self, ToolSetVerificationError> {
+        let root = canonical_directory(root.into()).await?;
+        let mut paths = BTreeMap::new();
+        for entry in entries {
+            if paths.contains_key(&entry.tool) {
+                return Err(ToolSetVerificationError::DuplicateManagedTool { tool: entry.tool });
+            }
+            let path = confined_path(&root, &entry.relative_path).await?;
+            verify_file_digest(entry.tool, &path, entry.size, &entry.sha256).await?;
+            let executable_path = validate_executable_async(path).await?;
+            probe_tool(
+                runner.as_ref(),
+                entry.tool,
+                &entry.version,
+                executable_path.as_path(),
+                cancellation.child_token(),
+            )
+            .await
+            .map_err(|error| ToolSetVerificationError::Probe(Box::new(error)))?;
+            paths.insert(entry.tool, executable_path);
+        }
+        if paths.len() != Tool::ALL.len() || Tool::ALL.iter().any(|tool| !paths.contains_key(tool))
+        {
+            return Err(ToolSetVerificationError::IncompleteManagedInventory);
         }
         Ok(Self { target, paths })
     }
@@ -174,6 +281,55 @@ impl VerifiedToolSet {
     pub fn path(&self, tool: Tool) -> Option<&ExecutablePath> {
         self.paths.get(&tool)
     }
+}
+
+async fn read_checksum_inventory(path: &Path) -> Result<String, ToolSetVerificationError> {
+    let metadata =
+        tokio::fs::metadata(path)
+            .await
+            .map_err(|source| ToolSetVerificationError::Inspect {
+                path: path.to_path_buf(),
+                source,
+            })?;
+    if metadata.len() > MAX_STAGED_CHECKSUM_BYTES {
+        return Err(ToolSetVerificationError::ChecksumInventoryTooLarge {
+            path: path.to_path_buf(),
+            size: metadata.len(),
+        });
+    }
+    tokio::fs::read_to_string(path)
+        .await
+        .map_err(|source| ToolSetVerificationError::Inspect {
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+fn parse_checksum_inventory(
+    document: &str,
+) -> Result<BTreeMap<String, String>, ToolSetVerificationError> {
+    let mut checksums = BTreeMap::new();
+    for line in document.lines() {
+        let Some((digest, name)) = line.split_once("  ") else {
+            return Err(ToolSetVerificationError::InvalidChecksumInventory);
+        };
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            || name.is_empty()
+            || name.contains(['/', '\\'])
+            || checksums
+                .insert(name.to_owned(), digest.to_owned())
+                .is_some()
+        {
+            return Err(ToolSetVerificationError::InvalidChecksumInventory);
+        }
+    }
+    if checksums.len() != Tool::ALL.len() {
+        return Err(ToolSetVerificationError::InvalidChecksumInventory);
+    }
+    Ok(checksums)
 }
 
 struct ExpectedExecutable {
@@ -679,6 +835,15 @@ pub enum ToolSetVerificationError {
         /// Missing tool.
         tool: Tool,
     },
+    /// A signed managed inventory repeated one tool identity.
+    #[error("signed managed inventory repeats `{tool}`")]
+    DuplicateManagedTool {
+        /// Repeated tool.
+        tool: Tool,
+    },
+    /// A signed managed inventory did not contain exactly the four required tools.
+    #[error("signed managed inventory is incomplete")]
+    IncompleteManagedInventory,
     /// Receipt map unexpectedly omitted a loaded path.
     #[error("native build receipt `{path}` was not loaded")]
     MissingReceipt {
@@ -737,7 +902,7 @@ pub enum ToolSetVerificationError {
     ValidationTask(#[source] tokio::task::JoinError),
     /// A tool version probe failed.
     #[error(transparent)]
-    Probe(#[from] ToolProbeError),
+    Probe(Box<ToolProbeError>),
 }
 
 /// One version probe failed.

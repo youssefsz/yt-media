@@ -8,7 +8,8 @@ use crate::{
     ipc::{
         ActionResultDto, AnalyzeRequestDto, AnalyzeResponseDto, BootstrapStateDto,
         DestinationSelectionDto, EnqueueRequestDto, IPC_SCHEMA_VERSION, IpcErrorCodeDto,
-        IpcErrorDto, JobDto, JobIdRequestDto, SettingsDto, ToolStatusDto, UpdateSettingsRequestDto,
+        IpcErrorDto, JobDto, JobIdRequestDto, SettingsDto, ToolStatusDto, UpdateCheckResultDto,
+        UpdateSettingsRequestDto,
     },
     service::ApplicationService,
 };
@@ -190,6 +191,23 @@ pub async fn tool_status(
     service: State<'_, ApplicationService>,
 ) -> Result<Vec<ToolStatusDto>, IpcErrorDto> {
     Ok(service.tool_status().await)
+}
+
+/// Checks, downloads, verifies, health checks, and activates a newer signed tool set.
+#[tauri::command]
+pub async fn check_for_tool_updates(
+    service: State<'_, ApplicationService>,
+) -> Result<UpdateCheckResultDto, IpcErrorDto> {
+    service.check_for_tool_updates().await
+}
+
+/// Removes managed tool sets so resolution falls back to the immutable bundled baseline.
+#[tauri::command]
+pub async fn reset_tool_updates(
+    service: State<'_, ApplicationService>,
+) -> Result<ActionResultDto, IpcErrorDto> {
+    service.reset_tool_updates().await?;
+    Ok(action_result())
 }
 
 fn action_result() -> ActionResultDto {

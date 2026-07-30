@@ -11,6 +11,7 @@ import type {
   JobIdRequestDto,
   SettingsDto,
   ToolStatusDto,
+  UpdateCheckResultDto,
   UpdateSettingsRequestDto,
 } from '../ipc/generated';
 
@@ -493,6 +494,20 @@ export class FixtureDesktopClient implements DesktopClient {
     this.calls.push('tool-status');
     return this.commandError === null
       ? Promise.resolve(this.snapshot.tools)
+      : Promise.reject(this.commandError);
+  }
+
+  checkForToolUpdates(): Promise<UpdateCheckResultDto> {
+    this.calls.push('check-tool-updates');
+    return this.commandError === null
+      ? Promise.resolve({ schema_version: 1, status: 'current', version: '0.1.0' })
+      : Promise.reject(this.commandError);
+  }
+
+  resetToolUpdates(): Promise<ActionResultDto> {
+    this.calls.push('reset-tool-updates');
+    return this.commandError === null
+      ? Promise.resolve({ schema_version: 1 })
       : Promise.reject(this.commandError);
   }
 

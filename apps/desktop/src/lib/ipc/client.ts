@@ -14,6 +14,7 @@ import type {
   JobIdRequestDto,
   SettingsDto,
   ToolStatusDto,
+  UpdateCheckResultDto,
   UpdateSettingsRequestDto,
 } from './generated';
 
@@ -35,6 +36,8 @@ export const commandNames = [
   'choose_destination',
   'reveal_output',
   'tool_status',
+  'check_for_tool_updates',
+  'reset_tool_updates',
 ] as const;
 
 export const bootstrap = (): Promise<BootstrapStateDto> => invoke<BootstrapStateDto>('bootstrap');
@@ -84,6 +87,12 @@ export const revealOutput = (request: JobIdRequestDto): Promise<ActionResultDto>
 export const requestToolStatus = (): Promise<ToolStatusDto[]> =>
   invoke<ToolStatusDto[]>('tool_status');
 
+export const checkForToolUpdates = (): Promise<UpdateCheckResultDto> =>
+  invoke<UpdateCheckResultDto>('check_for_tool_updates');
+
+export const resetToolUpdates = (): Promise<ActionResultDto> =>
+  invoke<ActionResultDto>('reset_tool_updates');
+
 export interface DesktopClient {
   connectJobEvents(
     onSnapshot: (snapshot: BootstrapStateDto) => void,
@@ -102,6 +111,8 @@ export interface DesktopClient {
   chooseDestination(): Promise<DestinationSelectionDto>;
   revealOutput(request: JobIdRequestDto): Promise<ActionResultDto>;
   requestToolStatus(): Promise<ToolStatusDto[]>;
+  checkForToolUpdates(): Promise<UpdateCheckResultDto>;
+  resetToolUpdates(): Promise<ActionResultDto>;
 }
 
 const isErrorCode = (value: unknown): value is IpcErrorDto['code'] => {
@@ -117,6 +128,7 @@ const isErrorCode = (value: unknown): value is IpcErrorDto['code'] => {
     case 'shutting-down':
     case 'destination-selection-failed':
     case 'reveal-failed':
+    case 'update-unavailable':
     case 'internal':
       return true;
     default:
@@ -201,4 +213,6 @@ export const desktopClient: DesktopClient = {
   chooseDestination,
   revealOutput,
   requestToolStatus,
+  checkForToolUpdates,
+  resetToolUpdates,
 };

@@ -8,9 +8,12 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use async_trait::async_trait;
+use semver::Version;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, OnceCell};
 use yt_media_engine::{
     analysis::{AnalysisTools, AnalyzeError, Analyzer, MediaUrl},
@@ -26,13 +29,18 @@ use yt_media_engine::{
     resolver::{ResolutionMode, ResolvedTool, ToolResolutionConfig, ToolResolver, VerifiedToolSet},
     target::SupportedTarget,
     tool::Tool,
+    update::{
+        UpdateCheckMode, UpdateCheckOutcome, UpdateInstallPolicy, UpdateManager, UpdateTransport,
+        UpdateTransportError,
+    },
 };
 
 use crate::ipc::{
     AnalyzeRequestDto, AnalyzeResponseDto, BootstrapHealthDto, BootstrapStateDto,
     DefaultDestinationUpdateDto, EnqueueRequestDto, IPC_SCHEMA_VERSION, IpcErrorCodeDto,
     IpcErrorDto, JobDto, JobEventEnvelopeDto, JobIdRequestDto, OutputSelectionDto, SettingsDto,
-    ToolStatusDto, UpdatePreferenceDto, UpdateSettingsRequestDto,
+    ToolStatusDto, UpdateCheckResultDto, UpdateCheckStatusDto, UpdatePreferenceDto,
+    UpdateSettingsRequestDto,
 };
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -52,8 +60,14 @@ pub(crate) struct ServiceConfig {
     pub(crate) system_downloads_directory: Option<PathBuf>,
     /// Directory containing a verified managed tool update, when installed.
     pub(crate) managed_tools_directory: Option<PathBuf>,
+    /// Ed25519 public verification key embedded at release build time.
+    pub(crate) update_public_key_hex: Option<String>,
+    /// Repository release-asset endpoint for this target's signed channel manifest.
+    pub(crate) update_manifest_url: Option<String>,
     /// Directory containing the bundled baseline sidecars.
     pub(crate) bundled_tools_directory: Option<PathBuf>,
+    /// Qualified checksum inventory for Tauri external binaries.
+    pub(crate) bundled_checksum_path: Option<PathBuf>,
     /// Production or development-only system tool behavior.
     pub(crate) resolution_mode: ResolutionMode,
     /// Explicit system search path used only in development mode.
@@ -75,7 +89,19 @@ impl std::fmt::Debug for ServiceConfig {
             )
             .field("resolution_mode", &self.resolution_mode)
             .field("has_managed_tools", &self.managed_tools_directory.is_some())
+            .field(
+                "has_update_public_key",
+                &self.update_public_key_hex.is_some(),
+            )
+            .field(
+                "has_update_manifest_url",
+                &self.update_manifest_url.is_some(),
+            )
             .field("has_bundled_tools", &self.bundled_tools_directory.is_some())
+            .field(
+                "has_bundled_checksums",
+                &self.bundled_checksum_path.is_some(),
+            )
             .field("override_count", &self.explicit_overrides.len())
             .finish_non_exhaustive()
     }
@@ -89,18 +115,24 @@ impl ServiceConfig {
         resource_directory: &Path,
         system_downloads_directory: Option<PathBuf>,
     ) -> Self {
-        let target = SupportedTarget::current().ok();
-        let managed_tools_directory = target.map(|target| {
-            data_directory
-                .join("tools")
-                .join("active")
-                .join(target.triple())
-        });
+        let managed_tools_directory = Some(data_directory.join("tools"));
+        let update_public_key_hex = option_env!("YT_MEDIA_UPDATE_PUBLIC_KEY_HEX")
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let update_manifest_url = option_env!("YT_MEDIA_UPDATE_MANIFEST_URL")
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let bundled_tools_directory = std::env::current_exe()
+            .ok()
+            .and_then(|executable| executable.parent().map(Path::to_path_buf));
         Self {
             data_directory,
             system_downloads_directory,
             managed_tools_directory,
-            bundled_tools_directory: Some(resource_directory.join("sidecars")),
+            update_public_key_hex,
+            update_manifest_url,
+            bundled_tools_directory,
+            bundled_checksum_path: Some(resource_directory.join("sidecars").join("SHA256SUMS")),
             resolution_mode: if cfg!(debug_assertions) {
                 ResolutionMode::Development
             } else {
@@ -478,6 +510,123 @@ impl ApplicationService {
         self.initialized().await.tools.clone()
     }
 
+    /// Runs an explicit signed check and installs a newer healthy set.
+    pub(crate) async fn check_for_tool_updates(&self) -> Result<UpdateCheckResultDto, IpcErrorDto> {
+        self.ensure_open()?;
+        self.perform_update_check(UpdateCheckMode::Manual, UpdateInstallPolicy::Install)
+            .await
+    }
+
+    /// Runs the preference-controlled, non-blocking startup check.
+    pub(crate) async fn background_update_check(&self) {
+        let settings = match self.read_settings().await {
+            Ok(settings) => settings,
+            Err(error) => {
+                eprintln!("background tool update could not read settings: {error:?}");
+                return;
+            }
+        };
+        let install_policy = match settings.update_preference {
+            UpdatePreferenceDto::Disabled => return,
+            UpdatePreferenceDto::Notify => UpdateInstallPolicy::CheckOnly,
+            UpdatePreferenceDto::Automatic => UpdateInstallPolicy::Install,
+        };
+        if let Err(error) = self
+            .perform_update_check(UpdateCheckMode::Background, install_policy)
+            .await
+        {
+            eprintln!("background tool update check failed safely: {error:?}");
+        }
+    }
+
+    /// Removes only managed update state so the immutable bundled baseline is selected.
+    pub(crate) async fn reset_tool_updates(&self) -> Result<(), IpcErrorDto> {
+        self.ensure_open()?;
+        self.update_manager()?
+            .reset_to_bundled()
+            .await
+            .map_err(|error| update_error(&error))
+    }
+
+    async fn perform_update_check(
+        &self,
+        mode: UpdateCheckMode,
+        install_policy: UpdateInstallPolicy,
+    ) -> Result<UpdateCheckResultDto, IpcErrorDto> {
+        let endpoint = self.config.update_manifest_url.as_deref().ok_or_else(|| {
+            IpcErrorDto::new(
+                IpcErrorCodeDto::UpdateUnavailable,
+                "Verified tool updates are not configured in this application build.",
+            )
+        })?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| {
+                IpcErrorDto::new(
+                    IpcErrorCodeDto::UpdateUnavailable,
+                    "The system clock cannot be used for a verified update check.",
+                )
+            })?
+            .as_secs();
+        let transport =
+            ReqwestUpdateTransport::new().map_err(|error| update_transport_error(&error))?;
+        let outcome = self
+            .update_manager()?
+            .check_and_install(
+                &transport,
+                endpoint,
+                mode,
+                install_policy,
+                now,
+                CancellationToken::new(),
+            )
+            .await
+            .map_err(|error| update_error(&error))?;
+        Ok(UpdateCheckResultDto {
+            schema_version: IPC_SCHEMA_VERSION,
+            status: match outcome {
+                UpdateCheckOutcome::SkippedRecently => UpdateCheckStatusDto::SkippedRecently,
+                UpdateCheckOutcome::Current { .. } => UpdateCheckStatusDto::Current,
+                UpdateCheckOutcome::Available { .. } => UpdateCheckStatusDto::Available,
+                UpdateCheckOutcome::Installed { .. } => UpdateCheckStatusDto::Installed,
+            },
+            version: match outcome {
+                UpdateCheckOutcome::SkippedRecently => None,
+                UpdateCheckOutcome::Current { version }
+                | UpdateCheckOutcome::Available { version }
+                | UpdateCheckOutcome::Installed { version } => Some(version.to_string()),
+            },
+        })
+    }
+
+    fn update_manager(&self) -> Result<UpdateManager, IpcErrorDto> {
+        let root = self
+            .config
+            .managed_tools_directory
+            .as_deref()
+            .ok_or_else(update_not_configured)?;
+        let public_key = self
+            .config
+            .update_public_key_hex
+            .as_deref()
+            .ok_or_else(update_not_configured)?;
+        let target = SupportedTarget::current().map_err(|error| {
+            eprintln!("desktop update target resolution failed: {error:#}");
+            update_not_configured()
+        })?;
+        let application_version = Version::parse(env!("CARGO_PKG_VERSION")).map_err(|error| {
+            eprintln!("desktop application version is invalid: {error:#}");
+            update_not_configured()
+        })?;
+        Ok(UpdateManager::new(
+            root,
+            target,
+            application_version,
+            public_key,
+            Arc::clone(&self.config.runner),
+        ))
+    }
+
     /// Validates that a job owns a present completed output and returns its user-facing path.
     pub(crate) async fn revealable_output(
         &self,
@@ -588,15 +737,17 @@ async fn resolve_tools(config: &ServiceConfig) -> Result<Vec<ResolvedTool>, ()> 
     let target = SupportedTarget::current().map_err(|error| {
         eprintln!("desktop target resolution failed: {error:#}");
     })?;
-    let managed_update = verify_optional_staged(
+    let managed_update = verify_optional_managed(
         config.managed_tools_directory.as_deref(),
+        config.update_public_key_hex.as_deref(),
         target,
         Arc::clone(&config.runner),
         "managed",
     )
     .await;
-    let bundled_baseline = verify_optional_staged(
+    let bundled_baseline = verify_optional_bundled(
         config.bundled_tools_directory.as_deref(),
+        config.bundled_checksum_path.as_deref(),
         target,
         Arc::clone(&config.runner),
         "bundled",
@@ -624,6 +775,200 @@ async fn resolve_tools(config: &ServiceConfig) -> Result<Vec<ResolvedTool>, ()> 
         }
     }
     Ok(resolved_tools)
+}
+
+async fn verify_optional_managed(
+    root: Option<&Path>,
+    public_key_hex: Option<&str>,
+    target: SupportedTarget,
+    runner: Arc<dyn ProcessRunner>,
+    tier: &str,
+) -> Option<VerifiedToolSet> {
+    let (root, public_key_hex) = root.zip(public_key_hex)?;
+    let application_version = match Version::parse(env!("CARGO_PKG_VERSION")) {
+        Ok(version) => version,
+        Err(error) => {
+            eprintln!("desktop application version is invalid: {error:#}");
+            return None;
+        }
+    };
+    let manager = UpdateManager::new(
+        root,
+        target,
+        application_version,
+        public_key_hex,
+        Arc::clone(&runner),
+    );
+    match manager.load_active(CancellationToken::new()).await {
+        Ok(verified) => {
+            if let Err(error) = manager.record_startup_success().await {
+                eprintln!("desktop could not clear managed startup failures: {error:#}");
+            }
+            Some(verified)
+        }
+        Err(error) => {
+            let active = root.join("active").join(target.triple());
+            if active.exists()
+                && let Err(failure_error) = manager.record_startup_failure().await
+            {
+                eprintln!("desktop could not record managed startup failure: {failure_error:#}");
+            }
+            eprintln!("desktop {tier} tool verification failed: {error:#}");
+            None
+        }
+    }
+}
+
+async fn verify_optional_bundled(
+    directory: Option<&Path>,
+    checksum_path: Option<&Path>,
+    target: SupportedTarget,
+    runner: Arc<dyn ProcessRunner>,
+    tier: &str,
+) -> Option<VerifiedToolSet> {
+    if let Some(checksum_path) = checksum_path {
+        let directory = directory.filter(|path| path.is_dir())?;
+        return match VerifiedToolSet::verify_external(
+            target,
+            directory,
+            checksum_path,
+            runner,
+            CancellationToken::new(),
+        )
+        .await
+        {
+            Ok(verified) => Some(verified),
+            Err(error) => {
+                eprintln!("desktop {tier} tool verification failed: {error:#}");
+                None
+            }
+        };
+    }
+    verify_optional_staged(directory, target, runner, tier).await
+}
+
+struct ReqwestUpdateTransport {
+    client: reqwest::Client,
+}
+
+impl ReqwestUpdateTransport {
+    fn new() -> Result<Self, reqwest::Error> {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_mins(15))
+            .user_agent(concat!("yt-media/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map(|client| Self { client })
+    }
+
+    async fn response(
+        &self,
+        url: &str,
+        maximum_bytes: u64,
+    ) -> Result<reqwest::Response, UpdateTransportError> {
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .await
+            .map_err(UpdateTransportError::adapter)?;
+        if !response.status().is_success() {
+            return Err(UpdateTransportError::HttpStatus {
+                status: response.status().as_u16(),
+            });
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > maximum_bytes)
+        {
+            return Err(UpdateTransportError::ResponseTooLarge { maximum_bytes });
+        }
+        Ok(response)
+    }
+}
+
+#[async_trait]
+impl UpdateTransport for ReqwestUpdateTransport {
+    async fn fetch_bytes(
+        &self,
+        url: &str,
+        maximum_bytes: u64,
+    ) -> Result<Vec<u8>, UpdateTransportError> {
+        let mut response = self.response(url, maximum_bytes).await?;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(UpdateTransportError::adapter)?
+        {
+            let next = u64::try_from(bytes.len())
+                .unwrap_or(u64::MAX)
+                .saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+            if next > maximum_bytes {
+                return Err(UpdateTransportError::ResponseTooLarge { maximum_bytes });
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(bytes)
+    }
+
+    async fn download_file(
+        &self,
+        url: &str,
+        destination: &Path,
+        maximum_bytes: u64,
+    ) -> Result<u64, UpdateTransportError> {
+        let mut response = self.response(url, maximum_bytes).await?;
+        let mut file = tokio::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(destination)
+            .await
+            .map_err(UpdateTransportError::adapter)?;
+        let mut downloaded = 0_u64;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(UpdateTransportError::adapter)?
+        {
+            downloaded = downloaded
+                .checked_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX))
+                .ok_or(UpdateTransportError::ResponseTooLarge { maximum_bytes })?;
+            if downloaded > maximum_bytes {
+                return Err(UpdateTransportError::ResponseTooLarge { maximum_bytes });
+            }
+            file.write_all(&chunk)
+                .await
+                .map_err(UpdateTransportError::adapter)?;
+        }
+        file.sync_all()
+            .await
+            .map_err(UpdateTransportError::adapter)?;
+        Ok(downloaded)
+    }
+}
+
+fn update_not_configured() -> IpcErrorDto {
+    IpcErrorDto::new(
+        IpcErrorCodeDto::UpdateUnavailable,
+        "Verified tool updates are not configured in this application build.",
+    )
+}
+
+fn update_transport_error(error: &reqwest::Error) -> IpcErrorDto {
+    eprintln!("desktop update client setup failed: {error:#}");
+    IpcErrorDto::new(
+        IpcErrorCodeDto::UpdateUnavailable,
+        "The verified update client could not be initialized.",
+    )
+}
+
+fn update_error(error: &yt_media_engine::update::UpdateError) -> IpcErrorDto {
+    eprintln!("desktop verified tool update failed: {error:#}");
+    IpcErrorDto::new(
+        IpcErrorCodeDto::UpdateUnavailable,
+        "The verified tool update could not be completed. Bundled tools remain available.",
+    )
 }
 
 async fn verify_optional_staged(
@@ -1037,7 +1382,10 @@ mod tests {
             data_directory: root.join("data"),
             system_downloads_directory: Some(downloads),
             managed_tools_directory: None,
+            update_public_key_hex: None,
+            update_manifest_url: None,
             bundled_tools_directory: None,
+            bundled_checksum_path: None,
             resolution_mode: ResolutionMode::Production,
             path_environment: None,
             explicit_overrides,
@@ -1351,7 +1699,10 @@ mod tests {
             data_directory: root.path().join("degraded-data"),
             system_downloads_directory: Some(root.path().join("Downloads")),
             managed_tools_directory: None,
+            update_public_key_hex: None,
+            update_manifest_url: None,
             bundled_tools_directory: None,
+            bundled_checksum_path: None,
             resolution_mode: ResolutionMode::Production,
             path_environment: None,
             explicit_overrides: std::collections::BTreeMap::new(),
@@ -1370,7 +1721,10 @@ mod tests {
             data_directory: invalid_data,
             system_downloads_directory: Some(root.path().join("Downloads")),
             managed_tools_directory: None,
+            update_public_key_hex: None,
+            update_manifest_url: None,
             bundled_tools_directory: None,
+            bundled_checksum_path: None,
             resolution_mode: ResolutionMode::Production,
             path_environment: None,
             explicit_overrides: std::collections::BTreeMap::new(),

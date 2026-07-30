@@ -134,6 +134,8 @@
             onChooseDefaultDestination={controller.chooseDefaultDestination}
             onClearDefaultDestination={controller.clearDefaultDestination}
             onRefreshTools={controller.refreshTools}
+            onCheckForToolUpdates={controller.checkForToolUpdates}
+            onResetToolUpdates={controller.resetToolUpdates}
           />
         {/if}
       </main>

@@ -12,3 +12,4 @@ pub mod process;
 pub mod resolver;
 pub mod target;
 pub mod tool;
+pub mod update;

@@ -85,6 +85,13 @@ pub fn run() -> Result<(), tauri::Error> {
                 sink,
             ));
             app.manage(NativeLifecycle::default());
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                app_handle
+                    .state::<ApplicationService>()
+                    .background_update_check()
+                    .await;
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -105,6 +112,8 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::choose_destination,
             commands::reveal_output,
             commands::tool_status,
+            commands::check_for_tool_updates,
+            commands::reset_tool_updates,
         ])
         .build(tauri::generate_context!())?;
     app.run(|app_handle, event| {

@@ -15,6 +15,7 @@ expected_digest() {
 
 verify_tree() {
   local root="$1"
+  local mode="${2:-raw}"
   for tool in yt-dlp ffmpeg ffprobe deno; do
     local qualified="${tool}-${target}"
     local expected
@@ -25,8 +26,15 @@ verify_tree() {
       matches[${#matches[@]}]="$match"
     done < <(find "$root" -type f -name "$tool" -print0)
     test "${#matches[@]}" -eq 1
+    local digest_path="${matches[0]}"
+    if [[ "$mode" == "signed-macos" ]]; then
+      codesign --verify --strict "$digest_path"
+      digest_path="${inspection_root}/unsigned-${tool}"
+      cp -- "${matches[0]}" "$digest_path"
+      codesign --remove-signature "$digest_path"
+    fi
     local found
-    found="$(shasum -a 256 "${matches[0]}" | awk '{print $1}')"
+    found="$(shasum -a 256 "$digest_path" | awk '{print $1}')"
     test "$found" = "$expected"
   done
   if find "$root" \( -name '*.part' -o -name '*.tmp' -o -name '.cache' -o -path '*/staging/*' -o -path '*/updates/*' \) -print -quit | grep -q .; then
@@ -44,7 +52,7 @@ if [[ "$target" == *apple-darwin ]]; then
   trap 'hdiutil detach "$mount_point" >/dev/null 2>&1 || true' EXIT
   app="$(find "$mount_point" -type d -name '*.app' -print -quit)"
   test -n "$app"
-  verify_tree "${app}/Contents/MacOS"
+  verify_tree "${app}/Contents/MacOS" signed-macos
   codesign --verify --deep --strict "$app"
   hdiutil detach "$mount_point"
   trap - EXIT
@@ -56,6 +64,7 @@ else
   appimage="$(find "$bundle_directory" -type f -name '*.AppImage' -print -quit)"
   test -n "$deb"
   test -n "$appimage"
+  appimage="$(realpath "$appimage")"
   deb_root="${inspection_root}/deb"
   mkdir -p -- "$deb_root"
   dpkg-deb -x "$deb" "$deb_root"

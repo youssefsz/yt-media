@@ -24,7 +24,8 @@
     "ipc:check": "cargo run -p yt-media-desktop --bin generate-ipc -- --check",
     "lint": "eslint . --max-warnings 0 && cargo clippy --workspace --all-targets --all-features -- -D warnings",
     "sidecars:desktop": "cargo xtask sidecars stage --desktop",
-    "test": "pnpm --filter @yt-media/desktop test && pnpm ipc:check && cargo test --workspace --all-features"
+    "test": "pnpm --filter @yt-media/desktop test && pnpm ipc:check && cargo test --workspace --all-features",
+    "test:visual": "pnpm --filter @yt-media/desktop test:visual"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

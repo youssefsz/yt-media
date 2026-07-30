@@ -105,6 +105,33 @@ impl JobState {
         matches!(self, Self::Completed | Self::Cancelled | Self::Failed)
     }
 
+    /// Returns whether an explicit pause request is valid for this lifecycle state.
+    #[must_use]
+    pub const fn can_pause(self) -> bool {
+        matches!(
+            self,
+            Self::Queued | Self::Analyzing | Self::Downloading | Self::Merging | Self::Converting
+        )
+    }
+
+    /// Returns whether an explicit resume request is valid for this lifecycle state.
+    #[must_use]
+    pub const fn can_resume(self) -> bool {
+        matches!(self, Self::Paused | Self::Interrupted)
+    }
+
+    /// Returns whether an explicit cancel request is valid for this lifecycle state.
+    #[must_use]
+    pub const fn can_cancel(self) -> bool {
+        self.can_pause() || self.can_resume()
+    }
+
+    /// Returns whether an explicit retry request is valid for this lifecycle state.
+    #[must_use]
+    pub const fn can_retry(self) -> bool {
+        matches!(self, Self::Cancelled | Self::Failed)
+    }
+
     /// Returns whether the requested lifecycle transition is valid.
     #[must_use]
     pub const fn can_transition_to(self, next: Self) -> bool {
@@ -568,6 +595,32 @@ mod tests {
                     "{previous} -> {next}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn explicit_action_eligibility_is_owned_by_the_lifecycle_model() {
+        for state in JobState::ALL {
+            assert_eq!(
+                state.can_pause(),
+                matches!(
+                    state,
+                    JobState::Queued
+                        | JobState::Analyzing
+                        | JobState::Downloading
+                        | JobState::Merging
+                        | JobState::Converting
+                )
+            );
+            assert_eq!(
+                state.can_resume(),
+                matches!(state, JobState::Paused | JobState::Interrupted)
+            );
+            assert_eq!(state.can_cancel(), state.can_pause() || state.can_resume());
+            assert_eq!(
+                state.can_retry(),
+                matches!(state, JobState::Cancelled | JobState::Failed)
+            );
         }
     }
 

@@ -86,6 +86,7 @@ struct QueueInner {
     active: Mutex<HashMap<JobId, JobControls>>,
     events: broadcast::Sender<QueueEvent>,
     event_sequence: AtomicU64,
+    scheduler_generation: AtomicU64,
     scheduler_running: AtomicBool,
     closing: AtomicBool,
     shutdown_interruption: AtomicBool,
@@ -149,6 +150,7 @@ impl JobQueue {
                 active: Mutex::new(HashMap::new()),
                 events,
                 event_sequence: AtomicU64::new(1),
+                scheduler_generation: AtomicU64::new(0),
                 scheduler_running: AtomicBool::new(false),
                 closing: AtomicBool::new(false),
                 shutdown_interruption: AtomicBool::new(false),
@@ -316,6 +318,7 @@ impl JobQueue {
                 state: current.state,
             });
         }
+        self.wait_until_inactive(id).await;
         let record = self
             .inner
             .store
@@ -494,6 +497,18 @@ impl JobQueue {
         }
     }
 
+    async fn wait_until_inactive(&self, id: &JobId) {
+        loop {
+            let inactive = self.inner.inactive_notify.notified();
+            tokio::pin!(inactive);
+            inactive.as_mut().enable();
+            if !self.inner.active.lock().await.contains_key(id) {
+                return;
+            }
+            inactive.await;
+        }
+    }
+
     /// Requests bounded shutdown, retains resumable partials, and records active work as
     /// interrupted.
     ///
@@ -611,6 +626,9 @@ impl JobQueue {
     }
 
     fn kick_scheduler(&self) {
+        self.inner
+            .scheduler_generation
+            .fetch_add(1, Ordering::AcqRel);
         self.inner.scheduler_notify.notify_waiters();
         if self
             .inner
@@ -627,13 +645,19 @@ impl JobQueue {
 
     async fn scheduler_loop(self) {
         loop {
+            let observed_generation = self.inner.scheduler_generation.load(Ordering::Acquire);
             if self.inner.closing.load(Ordering::Acquire) {
-                break;
+                self.inner.scheduler_running.store(false, Ordering::Release);
+                self.inner.inactive_notify.notify_waiters();
+                return;
             }
-            let limit = match self.inner.store.settings().await {
-                Ok(settings) => usize::from(settings.queue_concurrency.get()),
-                Err(_) => break,
+            let Ok(settings) = self.inner.store.settings().await else {
+                if self.release_scheduler(observed_generation) {
+                    continue;
+                }
+                return;
             };
+            let limit = usize::from(settings.queue_concurrency.get());
             let active = self.inner.active.lock().await.len();
             if active >= limit {
                 self.inner.scheduler_notify.notified().await;
@@ -643,18 +667,36 @@ impl JobQueue {
                 Ok(Some(record)) => record,
                 Ok(None) => {
                     if active == 0 {
-                        break;
+                        if self.release_scheduler(observed_generation) {
+                            continue;
+                        }
+                        return;
                     }
                     self.inner.scheduler_notify.notified().await;
                     continue;
                 }
-                Err(_) => break,
+                Err(_) => {
+                    if self.release_scheduler(observed_generation) {
+                        continue;
+                    }
+                    return;
+                }
             };
             self.emit(record.clone());
             self.start_claimed(record).await;
         }
+    }
+
+    fn release_scheduler(&self, observed_generation: u64) -> bool {
         self.inner.scheduler_running.store(false, Ordering::Release);
         self.inner.inactive_notify.notify_waiters();
+        if self.inner.scheduler_generation.load(Ordering::Acquire) == observed_generation {
+            return false;
+        }
+        self.inner
+            .scheduler_running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
     }
 
     async fn start_claimed(&self, record: JobRecord) {
@@ -723,9 +765,12 @@ impl JobQueue {
         while let Ok(event) = events.try_recv() {
             let _ignored = self.persist_activity(&id, event.kind, &controls).await;
         }
-        self.finish_runtime(id.clone(), result).await;
+        let finished = self.finish_runtime(id.clone(), result).await;
         self.inner.active.lock().await.remove(&id);
         self.inner.inactive_notify.notify_waiters();
+        if let Some(record) = finished {
+            self.emit(record);
+        }
         self.inner.scheduler_notify.notify_waiters();
     }
 
@@ -765,7 +810,11 @@ impl JobQueue {
         Ok(())
     }
 
-    async fn finish_runtime(&self, id: JobId, result: Result<DownloadResult, DownloadError>) {
+    async fn finish_runtime(
+        &self,
+        id: JobId,
+        result: Result<DownloadResult, DownloadError>,
+    ) -> Option<JobRecord> {
         let persisted = match result {
             Ok(result) => {
                 let output = FinalOutput {
@@ -785,7 +834,7 @@ impl JobQueue {
                     JobState::Paused
                 };
                 let Ok(current) = self.get(&id).await else {
-                    return;
+                    return None;
                 };
                 let owned = match self.reconcile_ownership(&current, false).await {
                     Ok(paths) => paths,
@@ -800,9 +849,9 @@ impl JobQueue {
                             .finish_job(id.clone(), JobState::Failed, Some(failure), None)
                             .await
                         {
-                            self.emit(record);
+                            return Some(record);
                         }
-                        return;
+                        return None;
                     }
                 };
                 let _ignored = self
@@ -829,9 +878,7 @@ impl JobQueue {
                     .await
             }
         };
-        if let Ok(record) = persisted {
-            self.emit(record);
-        }
+        persisted.ok()
     }
 }
 

@@ -14,7 +14,7 @@ use yt_media_engine::{
     cancellation::CancellationToken,
     download::{
         AudioQuality, Destination, DownloadError, DownloadRequest, DownloadService, DownloadTools,
-        JobEventKind, JobStage, OutputName, OutputSelection,
+        JobEventKind, JobStage, OutputName, OutputSelection, VideoQuality,
     },
     path::ExecutablePath,
     process::{
@@ -24,11 +24,31 @@ use yt_media_engine::{
 };
 
 const ANALYSIS: &str = include_str!("fixtures/analysis/progressive.json");
+const ADAPTIVE_ANALYSIS: &str = include_str!("fixtures/analysis/adaptive.json");
 const PROBE: &str = r#"{"streams":[{"codec_type":"audio","codec_name":"mp3"}],"format":{"format_name":"mp3","duration":"212.400"}}"#;
+const MP4_PROBE: &str = r#"{"streams":[{"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"pix_fmt":"yuv420p"},{"codec_type":"audio","codec_name":"aac"}],"format":{"format_name":"mov,mp4","duration":"90.0"}}"#;
 
-#[derive(Default)]
 struct FixtureRunner {
     calls: Mutex<Vec<(PathBuf, Vec<OsString>)>>,
+    analysis: &'static str,
+}
+
+impl Default for FixtureRunner {
+    fn default() -> Self {
+        Self {
+            calls: Mutex::default(),
+            analysis: ANALYSIS,
+        }
+    }
+}
+
+impl FixtureRunner {
+    fn adaptive() -> Self {
+        Self {
+            calls: Mutex::default(),
+            analysis: ADAPTIVE_ANALYSIS,
+        }
+    }
 }
 
 struct PausingRunner;
@@ -107,14 +127,18 @@ impl ProcessRunner for FixtureRunner {
             .iter()
             .any(|argument| argument == "--dump-single-json")
         {
-            return Ok(success_stdout(ANALYSIS.as_bytes()));
+            return Ok(success_stdout(self.analysis.as_bytes()));
         }
         let name = executable
             .file_stem()
             .and_then(|value| value.to_str())
             .unwrap_or_default();
         if name.contains("ffprobe") {
-            return Ok(success_stdout(PROBE.as_bytes()));
+            let probe = rendered
+                .last()
+                .filter(|target| target.ends_with(".mp4"))
+                .map_or(PROBE, |_| MP4_PROBE);
+            return Ok(success_stdout(probe.as_bytes()));
         }
         if name.contains("ffmpeg") {
             let Some(target) = arguments.last() else {
@@ -220,6 +244,49 @@ fn make_tools(directory: &Path) -> Result<DownloadTools, Box<dyn std::error::Err
 }
 
 #[tokio::test]
+async fn split_stream_job_uses_analyzed_total_from_the_first_progress_event()
+-> Result<(), Box<dyn std::error::Error>> {
+    let directory = tempdir()?;
+    let tools = make_tools(directory.path())?;
+    let runner = Arc::new(FixtureRunner::adaptive());
+    let service = DownloadService::with_runner(tools, runner);
+    let request = DownloadRequest {
+        url: MediaUrl::parse("https://www.youtube.com/watch?v=dQw4w9WgXcQ")?,
+        output: OutputSelection::Mp4(VideoQuality::try_from(1080)?),
+        destination: Destination::new(directory.path())?,
+        name: Some(OutputName::new("split-stream.mp4")?),
+    };
+    let started = service.start(request);
+    let mut events = started.events;
+    started.completion.wait().await?;
+
+    let mut progress = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if let JobEventKind::Progress { progress: snapshot } = event.kind
+            && snapshot.stage == JobStage::Downloading
+        {
+            progress.push(snapshot);
+        }
+    }
+    let first = progress
+        .first()
+        .ok_or_else(|| std::io::Error::other("no download progress was emitted"))?;
+    assert_eq!(first.completed, 50);
+    assert_eq!(first.total, Some(13_500_000));
+    assert!(first.percent.is_some_and(|percent| percent > 0.0));
+    assert!(
+        progress
+            .windows(2)
+            .all(|pair| pair[0].percent <= pair[1].percent)
+    );
+    assert_eq!(
+        progress.last().and_then(|snapshot| snapshot.percent),
+        Some(100.0)
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn complete_mp3_job_uses_exact_machine_contracts_and_no_clobber_publication()
 -> Result<(), Box<dyn std::error::Error>> {
     let directory = tempdir()?;
@@ -280,6 +347,11 @@ async fn complete_mp3_job_uses_exact_machine_contracts_and_no_clobber_publicatio
             "download:yt-media-progress|%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s",
         ]
     }));
+    assert!(
+        rendered[1]
+            .windows(2)
+            .any(|pair| pair == ["--progress-delta", "1"])
+    );
     assert!(
         rendered[1]
             .windows(2)

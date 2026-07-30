@@ -40,6 +40,7 @@ struct QueueFixtureRunner {
     active_downloads: AtomicUsize,
     maximum_active: AtomicUsize,
     started_targets: Mutex<Vec<PathBuf>>,
+    resumed_partial_seen: AtomicBool,
     analysis_override: Mutex<Option<&'static str>>,
     fail_download: AtomicBool,
     hold_until_released: AtomicBool,
@@ -66,6 +67,16 @@ impl QueueFixtureRunner {
         target: PathBuf,
         cancellation: CancellationToken,
     ) -> Result<ProcessOutput, ProcessError> {
+        let partial = target.with_file_name(format!(
+            "{}.part",
+            target
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+        ));
+        if partial.is_file() {
+            self.resumed_partial_seen.store(true, Ordering::Release);
+        }
         self.started_targets
             .lock()
             .map_err(|_| ProcessError::Write(std::io::Error::other("fixture lock poisoned")))?
@@ -85,13 +96,6 @@ impl QueueFixtureRunner {
             }
         }
         if self.block_downloads.load(Ordering::Acquire) {
-            let partial = target.with_file_name(format!(
-                "{}.part",
-                target
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or_default()
-            ));
             fs::write(partial, b"resumable queue fixture").map_err(ProcessError::Write)?;
             cancellation.cancelled().await;
             return Err(cancelled_process());
@@ -417,6 +421,7 @@ async fn pause_resume_preserves_identity_and_partials_then_history_reports_missi
     let completed = queue.wait_until_stopped(&job.id).await?;
     assert_eq!(completed.state, JobState::Completed);
     assert_eq!(completed.output_availability, OutputAvailability::Present);
+    assert!(runner.resumed_partial_seen.load(Ordering::Acquire));
     assert!(completed.owned_partial_paths.is_empty());
     assert_eq!(fs::read(&unrelated)?, b"user data");
 

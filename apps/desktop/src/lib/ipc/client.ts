@@ -20,6 +20,7 @@ import type {
 export const commandNames = [
   'bootstrap',
   'analyze',
+  'cancel_analysis',
   'enqueue',
   'list_jobs',
   'get_job',
@@ -40,6 +41,9 @@ export const bootstrap = (): Promise<BootstrapStateDto> => invoke<BootstrapState
 
 export const analyze = (request: AnalyzeRequestDto): Promise<AnalyzeResponseDto> =>
   invoke<AnalyzeResponseDto>('analyze', { request });
+
+export const cancelAnalysis = (): Promise<ActionResultDto> =>
+  invoke<ActionResultDto>('cancel_analysis');
 
 export const enqueue = (request: EnqueueRequestDto): Promise<JobDto> =>
   invoke<JobDto>('enqueue', { request });
@@ -80,6 +84,26 @@ export const revealOutput = (request: JobIdRequestDto): Promise<ActionResultDto>
 export const requestToolStatus = (): Promise<ToolStatusDto[]> =>
   invoke<ToolStatusDto[]>('tool_status');
 
+export interface DesktopClient {
+  connectJobEvents(
+    onSnapshot: (snapshot: BootstrapStateDto) => void,
+    onEvent: (event: JobEventEnvelopeDto) => void,
+  ): Promise<UnlistenFn>;
+  analyze(request: AnalyzeRequestDto): Promise<AnalyzeResponseDto>;
+  cancelAnalysis(): Promise<ActionResultDto>;
+  enqueue(request: EnqueueRequestDto): Promise<JobDto>;
+  getJob(request: JobIdRequestDto): Promise<JobDto>;
+  pauseJob(request: JobIdRequestDto): Promise<JobDto>;
+  resumeJob(request: JobIdRequestDto): Promise<JobDto>;
+  cancelJob(request: JobIdRequestDto): Promise<JobDto>;
+  retryJob(request: JobIdRequestDto): Promise<JobDto>;
+  deleteHistory(request: JobIdRequestDto): Promise<ActionResultDto>;
+  updateSettings(request: UpdateSettingsRequestDto): Promise<SettingsDto>;
+  chooseDestination(): Promise<DestinationSelectionDto>;
+  revealOutput(request: JobIdRequestDto): Promise<ActionResultDto>;
+  requestToolStatus(): Promise<ToolStatusDto[]>;
+}
+
 const isErrorCode = (value: unknown): value is IpcErrorDto['code'] => {
   switch (value) {
     case 'invalid-request':
@@ -88,6 +112,7 @@ const isErrorCode = (value: unknown): value is IpcErrorDto['code'] => {
     case 'invalid-job-state':
     case 'tools-unavailable':
     case 'analysis-failed':
+    case 'analysis-cancelled':
     case 'persistence-unavailable':
     case 'shutting-down':
     case 'destination-selection-failed':
@@ -136,7 +161,9 @@ export const connectJobEvents = async (
       buffered.push(payload);
       return;
     }
-    if (BigInt(payload.sequence) > boundary) {
+    const sequence = BigInt(payload.sequence);
+    if (sequence > boundary) {
+      boundary = sequence;
       onEvent(payload);
     }
   });
@@ -146,7 +173,9 @@ export const connectJobEvents = async (
     onSnapshot(snapshot);
     connected = true;
     for (const event of buffered) {
-      if (BigInt(event.sequence) > boundary) {
+      const sequence = BigInt(event.sequence);
+      if (sequence > boundary) {
+        boundary = sequence;
         onEvent(event);
       }
     }
@@ -155,4 +184,21 @@ export const connectJobEvents = async (
     unlisten();
     throw error;
   }
+};
+
+export const desktopClient: DesktopClient = {
+  connectJobEvents,
+  analyze,
+  cancelAnalysis,
+  enqueue,
+  getJob,
+  pauseJob,
+  resumeJob,
+  cancelJob,
+  retryJob,
+  deleteHistory,
+  updateSettings,
+  chooseDestination,
+  revealOutput,
+  requestToolStatus,
 };

@@ -325,7 +325,14 @@ impl DownloadService {
     ) -> Result<(), DownloadError> {
         emitter.stage(JobStage::Downloading);
         let source_count = if same_source(selected) { 1 } else { 2 };
-        let mut aggregator = DownloadProgressAggregator::new();
+        let estimated_total = match selected {
+            FormatOption::Mp4 {
+                estimated_size_bytes,
+                ..
+            } => *estimated_size_bytes,
+            FormatOption::Mp3 { .. } => None,
+        };
+        let mut aggregator = DownloadProgressAggregator::new(source_count, estimated_total);
         for source_index in 0..source_count {
             ensure_running(control)?;
             let (source, path) = workspace.source(source_index)?;
@@ -454,6 +461,8 @@ impl DownloadService {
             .argument(self.tools.ffmpeg.as_path().as_os_str())
             .arguments([
                 "--newline",
+                "--progress-delta",
+                "1",
                 "--progress-template",
                 YTDLP_PROGRESS_TEMPLATE,
                 "--continue",
@@ -535,19 +544,19 @@ impl DownloadService {
             .run_streaming(spec, cancellation, observer_sender);
         tokio::pin!(process);
         let mut lines = ProtocolLines::new();
-        let parser = FfmpegProgress::new(duration_millis);
+        let mut parser = FfmpegProgress::new(duration_millis);
         let output = loop {
             tokio::select! {
                 result = &mut process => break result,
                 event = observer_receiver.recv() => {
                     if let Some(event) = event {
-                        apply_ffmpeg_event(&event, stage, &mut lines, &parser, emitter);
+                        apply_ffmpeg_event(&event, stage, &mut lines, &mut parser, emitter);
                     }
                 }
             }
         };
         while let Ok(event) = observer_receiver.try_recv() {
-            apply_ffmpeg_event(&event, stage, &mut lines, &parser, emitter);
+            apply_ffmpeg_event(&event, stage, &mut lines, &mut parser, emitter);
         }
         if let Some(reason) = lines.invalid_reason() {
             return Err(DownloadError::Protocol {
@@ -1412,7 +1421,7 @@ fn apply_ffmpeg_event(
     event: &crate::process::ProcessEvent,
     stage: JobStage,
     lines: &mut ProtocolLines,
-    parser: &FfmpegProgress,
+    parser: &mut FfmpegProgress,
     emitter: &EventEmitter,
 ) {
     if event.stream != OutputStream::Stdout {

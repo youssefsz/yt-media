@@ -30,6 +30,8 @@ use super::{
 const READ_BUFFER_SIZE: usize = 8 * 1024;
 const PIPE_CHANNEL_CAPACITY: usize = 64;
 const STATUS_POLL_INTERVAL: Duration = Duration::from_millis(10);
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Asynchronous process execution boundary used by engine adapters.
 #[async_trait]
@@ -197,9 +199,11 @@ async fn spawn_owned_process(spec: &mut ProcessSpec) -> Result<OwnedProcess, Pro
         command.current_dir(directory);
     }
 
-    let mut child = command
-        .group()
-        .kill_on_drop(true)
+    let mut process_group = command.group();
+    process_group.kill_on_drop(true);
+    #[cfg(windows)]
+    process_group.creation_flags(CREATE_NO_WINDOW);
+    let mut child = process_group
         .spawn()
         .map_err(|source| ProcessError::Spawn {
             executable: executable.clone(),

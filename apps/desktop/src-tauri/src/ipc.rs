@@ -29,9 +29,10 @@ pub const IPC_SCHEMA_VERSION: u16 = 1;
 pub const JOB_EVENT_NAME: &str = "job-event-v1";
 
 /// Command names registered by the native shell and consumed by the typed client.
-pub const COMMAND_NAMES: [&str; 16] = [
+pub const COMMAND_NAMES: [&str; 17] = [
     "bootstrap",
     "analyze",
+    "cancel_analysis",
     "enqueue",
     "list_jobs",
     "get_job",
@@ -64,6 +65,8 @@ pub enum IpcErrorCodeDto {
     ToolsUnavailable,
     /// Media analysis failed safely.
     AnalysisFailed,
+    /// Media analysis was explicitly cancelled.
+    AnalysisCancelled,
     /// Queue persistence or recovery is unavailable.
     PersistenceUnavailable,
     /// The service is shutting down.
@@ -367,7 +370,7 @@ pub enum FormatOptionDto {
         /// Frames per second.
         fps: Option<f64>,
         /// Estimated combined size.
-        estimated_size_bytes: Option<u64>,
+        estimated_size_bytes: Option<String>,
         /// Selected video-bearing source.
         video_source: SourceFormatDto,
         /// Selected audio-bearing source.
@@ -389,9 +392,9 @@ pub struct MediaInfoDto {
     /// Uploader when present.
     pub uploader: Option<String>,
     /// Duration in milliseconds.
-    pub duration_ms: u64,
+    pub duration_ms: String,
     /// View count when present.
-    pub view_count: Option<u64>,
+    pub view_count: Option<String>,
     /// Upload date when present.
     pub upload_date: Option<String>,
     /// Validated thumbnails.
@@ -409,8 +412,8 @@ impl From<&MediaInfo> for MediaInfoDto {
             url: value.url.as_str().to_owned(),
             title: value.title.clone(),
             uploader: value.uploader.clone(),
-            duration_ms: value.duration.as_millis(),
-            view_count: value.view_count,
+            duration_ms: value.duration.as_millis().to_string(),
+            view_count: value.view_count.map(|count| count.to_string()),
             upload_date: value.upload_date.clone(),
             thumbnails: value
                 .thumbnails
@@ -449,7 +452,7 @@ impl From<&FormatOption> for FormatOptionDto {
                 height: *height,
                 width: *width,
                 fps: *fps,
-                estimated_size_bytes: *estimated_size_bytes,
+                estimated_size_bytes: estimated_size_bytes.map(|size| size.to_string()),
                 video_source: SourceFormatDto::from(video_source),
                 audio_source: SourceFormatDto::from(audio_source),
                 compatibility: CompatibilityWorkDto::from(*compatibility),
@@ -652,26 +655,26 @@ pub struct JobProgressDto {
     /// Current stage.
     pub stage: JobStageDto,
     /// Completed work.
-    pub completed: u64,
+    pub completed: String,
     /// Known total.
-    pub total: Option<u64>,
+    pub total: Option<String>,
     /// Percentage from zero through one hundred.
     pub percent: Option<f64>,
     /// Transfer speed.
-    pub bytes_per_second: Option<u64>,
+    pub bytes_per_second: Option<String>,
     /// Estimated seconds remaining.
-    pub eta_seconds: Option<u64>,
+    pub eta_seconds: Option<String>,
 }
 
 impl From<&JobProgress> for JobProgressDto {
     fn from(value: &JobProgress) -> Self {
         Self {
             stage: value.stage.into(),
-            completed: value.completed,
-            total: value.total,
+            completed: value.completed.to_string(),
+            total: value.total.map(|total| total.to_string()),
             percent: value.percent,
-            bytes_per_second: value.bytes_per_second,
-            eta_seconds: value.eta_seconds,
+            bytes_per_second: value.bytes_per_second.map(|speed| speed.to_string()),
+            eta_seconds: value.eta_seconds.map(|eta| eta.to_string()),
         }
     }
 }
@@ -743,9 +746,27 @@ pub struct FinalOutputDto {
     /// Published output path.
     pub path: String,
     /// Published size.
-    pub size_bytes: u64,
+    pub size_bytes: String,
     /// Requested output.
     pub output: OutputSelectionDto,
+}
+
+/// An explicit job action currently accepted by the engine lifecycle.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "kebab-case")]
+pub enum JobActionDto {
+    /// Pause queued or active work.
+    Pause,
+    /// Resume paused or interrupted work.
+    Resume,
+    /// Cancel non-terminal work.
+    Cancel,
+    /// Retry failed or cancelled work.
+    Retry,
+    /// Reveal a verified present output.
+    Reveal,
+    /// Delete completed history without deleting the output.
+    DeleteHistory,
 }
 
 /// Durable authoritative job snapshot.
@@ -768,11 +789,11 @@ pub struct JobDto {
     /// Persisted safe failure.
     pub error: Option<JobFailureDto>,
     /// Creation timestamp in epoch milliseconds.
-    pub created_at_ms: i64,
+    pub created_at_ms: String,
     /// Update timestamp in epoch milliseconds.
-    pub updated_at_ms: i64,
+    pub updated_at_ms: String,
     /// Completion timestamp in epoch milliseconds.
-    pub completed_at_ms: Option<i64>,
+    pub completed_at_ms: Option<String>,
     /// Explicitly started attempts.
     pub attempt_count: u32,
     /// Verified output.
@@ -781,10 +802,35 @@ pub struct JobDto {
     pub output_availability: OutputAvailabilityDto,
     /// Destination availability.
     pub destination_available: bool,
+    /// Whether the lifecycle state is terminal until an explicit retry.
+    pub is_terminal: bool,
+    /// Engine-owned actions valid for this authoritative snapshot.
+    pub available_actions: Vec<JobActionDto>,
 }
 
 impl From<&JobRecord> for JobDto {
     fn from(value: &JobRecord) -> Self {
+        let mut available_actions = Vec::new();
+        if value.state.can_pause() {
+            available_actions.push(JobActionDto::Pause);
+        }
+        if value.state.can_resume() {
+            available_actions.push(JobActionDto::Resume);
+        }
+        if value.state.can_cancel() {
+            available_actions.push(JobActionDto::Cancel);
+        }
+        if value.state.can_retry() {
+            available_actions.push(JobActionDto::Retry);
+        }
+        if value.state == JobState::Completed
+            && value.output_availability == OutputAvailability::Present
+        {
+            available_actions.push(JobActionDto::Reveal);
+        }
+        if value.state == JobState::Completed {
+            available_actions.push(JobActionDto::DeleteHistory);
+        }
         Self {
             id: value.id.as_str().to_owned(),
             canonical_url: value.request.canonical_url.clone(),
@@ -797,13 +843,13 @@ impl From<&JobRecord> for JobDto {
                 class: error.class.into(),
                 message: error.message.clone(),
             }),
-            created_at_ms: value.created_at_ms,
-            updated_at_ms: value.updated_at_ms,
-            completed_at_ms: value.completed_at_ms,
+            created_at_ms: value.created_at_ms.to_string(),
+            updated_at_ms: value.updated_at_ms.to_string(),
+            completed_at_ms: value.completed_at_ms.map(|timestamp| timestamp.to_string()),
             attempt_count: value.attempt_count,
             final_output: value.final_output.as_ref().map(|output| FinalOutputDto {
                 path: display_path(&output.path),
-                size_bytes: output.size_bytes,
+                size_bytes: output.size_bytes.to_string(),
                 output: output.output.into(),
             }),
             output_availability: match value.output_availability {
@@ -812,6 +858,8 @@ impl From<&JobRecord> for JobDto {
                 OutputAvailability::Missing => OutputAvailabilityDto::Missing,
             },
             destination_available: value.destination_available,
+            is_terminal: value.state.is_terminal(),
+            available_actions,
         }
     }
 }
@@ -863,7 +911,7 @@ pub struct JobEventEnvelopeDto {
     /// `UUIDv7` job identity.
     pub job_id: String,
     /// Authoritative update timestamp in epoch milliseconds.
-    pub timestamp_ms: i64,
+    pub timestamp_ms: String,
     /// Authoritative state.
     pub state: JobStateDto,
     /// Latest progress.
@@ -874,6 +922,10 @@ pub struct JobEventEnvelopeDto {
     pub error: Option<JobFailureDto>,
     /// Optional transient activity.
     pub activity: Option<JobActivityDto>,
+    /// Whether the updated lifecycle state is terminal until an explicit retry.
+    pub is_terminal: bool,
+    /// Engine-owned actions valid for the updated snapshot.
+    pub available_actions: Vec<JobActionDto>,
 }
 
 impl From<&QueueEvent> for JobEventEnvelopeDto {
@@ -889,6 +941,8 @@ impl From<&QueueEvent> for JobEventEnvelopeDto {
             result: job.final_output,
             error: job.error,
             activity: value.activity.as_ref().map(JobActivityDto::from),
+            is_terminal: job.is_terminal,
+            available_actions: job.available_actions,
         }
     }
 }
@@ -1013,6 +1067,7 @@ pub fn generated_typescript() -> String {
         JobFailureDto::decl(&config),
         OutputAvailabilityDto::decl(&config),
         FinalOutputDto::decl(&config),
+        JobActionDto::decl(&config),
         JobDto::decl(&config),
         JobActivityDto::decl(&config),
         JobEventEnvelopeDto::decl(&config),
@@ -1076,7 +1131,7 @@ pub fn generated_typescript_path() -> PathBuf {
         .join("generated.ts")
 }
 
-fn display_path(path: &Path) -> String {
+pub(crate) fn display_path(path: &Path) -> String {
     bounded(path.to_string_lossy(), 4_096)
 }
 

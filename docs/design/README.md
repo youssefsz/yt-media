@@ -51,3 +51,17 @@ Before editing UI, open the reference image. After editing:
 
 Aim for pixel-faithful hierarchy and rhythm, not fake cross-platform chrome or brittle fixed
 coordinates.
+
+## Brand Assets
+
+The approved product mark is a separated `YT` monogram: an amber `Y` ending in a download arrow
+beside an off-white `T`. The letters must retain visible negative space and must never overlap.
+
+- `apps/desktop/src-tauri/icon-source.svg` is the square production master for native app icons.
+- `apps/desktop/public/brand-mark.svg` is the transparent in-app mark used by the sidebar, startup
+  surface, and browser favicon.
+- Run `pnpm --filter @yt-media/desktop icons:generate` after changing the master. The command uses
+  Tauri's icon generator for Windows ICO and Store assets, macOS ICNS, and Linux PNG sizes, then
+  removes unused Android and iOS output because this repository ships a desktop application.
+- Do not edit generated PNG, ICO, or ICNS files manually. Change the vector master and regenerate
+  the complete set so every platform stays visually consistent.

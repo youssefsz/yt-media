@@ -72,11 +72,16 @@ pub fn run() -> Result<(), tauri::Error> {
         .setup(|app| {
             let data_directory = app.path().app_local_data_dir()?;
             let resource_directory = app.path().resource_dir()?;
+            let system_downloads_directory = app.path().download_dir().ok();
             let sink = Arc::new(TauriEventSink {
                 app: app.handle().clone(),
             });
             app.manage(ApplicationService::new(
-                ServiceConfig::production(data_directory, &resource_directory),
+                ServiceConfig::production(
+                    data_directory,
+                    &resource_directory,
+                    system_downloads_directory,
+                ),
                 sink,
             ));
             app.manage(NativeLifecycle::default());
@@ -85,6 +90,7 @@ pub fn run() -> Result<(), tauri::Error> {
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,
             commands::analyze,
+            commands::cancel_analysis,
             commands::enqueue,
             commands::list_jobs,
             commands::get_job,

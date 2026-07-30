@@ -91,6 +91,48 @@ responsive layouts, accessible interaction, restrained motion, and native platfo
 
 ## Decisions and Deviations
 
+- Native analyze-flow validation exposed a prerequisite engine compatibility defect: pinned
+  `yt-dlp` legitimately reports zero for bitrate fields that do not apply to a format, while the
+  Plan 02 normalizer rejected every present zero. Plan 06 includes the narrow parser correction
+  required to exercise the real desktop workflow. Zero is treated as unavailable for scoring;
+  negative, non-finite, and over-limit values remain invalid. No format-selection rule or broader
+  engine boundary changes.
+- Native navigation testing exposed two desktop integration defects hidden by frontend fixtures:
+  JSON IPC delivered Rust 64-bit integers as JavaScript numbers although generated types claimed
+  `bigint`, and analysis created a cancellation token with no cancellation owner. Plan 06 corrects
+  output-only 64-bit IPC fields to lossless decimal strings, adds one thin cancel-analysis command,
+  gives the service explicit ownership of the active analysis token, and rejects stale frontend
+  completions by operation identity. Production resolver and engine analysis rules are unchanged.
+- The desktop and CLI packages previously emitted the same `yt-media` binary into Cargo's shared
+  target directory. Build order could therefore make CLI tests launch the Tauri application and
+  hang indefinitely. The desktop binary is now uniquely named `yt-media-app`; its bundle and
+  window retain the user-facing `YT Media` product name.
+- The native shell resolves the operating system's Downloads directory and exposes it as the
+  desktop's effective destination only when the engine has no persisted user override. Clearing a
+  custom desktop destination therefore restores the native Downloads directory without storing a
+  platform-specific path as an engine default. The folder picker is explicitly parented to the
+  Tauri webview and its blocking native wait runs on a blocking worker, so selection and
+  cancellation both return without freezing the UI. CLI settings semantics remain unchanged.
+- The transfer shelf treats external progress as stage-local evidence, not an invented whole-job
+  estimate. Split-stream downloads seed their aggregate denominator from the combined source-size
+  estimate produced during analysis, then replace it with the sum of current yt-dlp totals after
+  every source reports. Estimate-only progress is capped below completion, displayed percentage
+  never moves backward when totals are revised, and genuinely unknown totals remain indeterminate.
+  ETA uses aggregate remaining bytes and requires a short stable sample window; network metrics
+  disappear outside the downloading stage. FFmpeg time units are never presented as bytes.
+- Native Windows installation testing exposed visible console windows for startup health probes and
+  media operations. The engine-owned process runner now adds the Win32 `CREATE_NO_WINDOW` creation
+  flag to every grouped child process on Windows. The existing Job Object ownership, piped output,
+  cancellation, and CLI presentation contracts are unchanged; macOS and Linux process spawning is
+  unaffected.
+- Installed-app pause/resume testing exposed a scheduler handoff race: a resume request could be
+  durably requeued while the current scheduler was between its final empty check and clearing its
+  running flag, losing the only wake-up and leaving the job queued. Scheduler kicks now carry a
+  monotonic generation so an in-flight shutdown either retains ownership or hands off to a newly
+  spawned scheduler. Active process ownership is also cleared before the paused state becomes
+  observable, and integration coverage verifies that the resumed yt-dlp attempt sees its retained
+  partial file.
+
 Record any accepted deviation here before code depends on it.
 
 ## Completion Evidence

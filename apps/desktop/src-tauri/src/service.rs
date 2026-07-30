@@ -6,20 +6,22 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
 
-use tokio::sync::OnceCell;
+use tokio::sync::{Mutex, OnceCell};
 use yt_media_engine::{
-    analysis::{AnalysisTools, Analyzer, MediaUrl},
+    analysis::{AnalysisTools, AnalyzeError, Analyzer, MediaUrl},
     cancellation::CancellationToken,
     download::{
         AudioQuality, Destination, DownloadRequest, DownloadService, DownloadTools, JobId,
         OutputName, OutputSelection, VideoQuality,
     },
-    jobs::{JobQueue, QueueConcurrency, QueueError, SettingsPatch, UpdatePreference},
+    jobs::{
+        EngineSettings, JobQueue, QueueConcurrency, QueueError, SettingsPatch, UpdatePreference,
+    },
     process::{ProcessRunner, TokioProcessRunner},
     resolver::{ResolutionMode, ResolvedTool, ToolResolutionConfig, ToolResolver, VerifiedToolSet},
     target::SupportedTarget,
@@ -46,6 +48,8 @@ pub(crate) trait JobEventSink: Send + Sync + 'static {
 pub(crate) struct ServiceConfig {
     /// Private application data directory.
     pub(crate) data_directory: PathBuf,
+    /// Native operating-system Downloads directory used when no override is persisted.
+    pub(crate) system_downloads_directory: Option<PathBuf>,
     /// Directory containing a verified managed tool update, when installed.
     pub(crate) managed_tools_directory: Option<PathBuf>,
     /// Directory containing the bundled baseline sidecars.
@@ -65,6 +69,10 @@ impl std::fmt::Debug for ServiceConfig {
         formatter
             .debug_struct("ServiceConfig")
             .field("data_directory", &self.data_directory)
+            .field(
+                "has_system_downloads_directory",
+                &self.system_downloads_directory.is_some(),
+            )
             .field("resolution_mode", &self.resolution_mode)
             .field("has_managed_tools", &self.managed_tools_directory.is_some())
             .field("has_bundled_tools", &self.bundled_tools_directory.is_some())
@@ -76,7 +84,11 @@ impl std::fmt::Debug for ServiceConfig {
 impl ServiceConfig {
     /// Creates production defaults for native application paths.
     #[must_use]
-    pub(crate) fn production(data_directory: PathBuf, resource_directory: &Path) -> Self {
+    pub(crate) fn production(
+        data_directory: PathBuf,
+        resource_directory: &Path,
+        system_downloads_directory: Option<PathBuf>,
+    ) -> Self {
         let target = SupportedTarget::current().ok();
         let managed_tools_directory = target.map(|target| {
             data_directory
@@ -86,6 +98,7 @@ impl ServiceConfig {
         });
         Self {
             data_directory,
+            system_downloads_directory,
             managed_tools_directory,
             bundled_tools_directory: Some(resource_directory.join("sidecars")),
             resolution_mode: if cfg!(debug_assertions) {
@@ -111,12 +124,20 @@ struct InitializedService {
     diagnostic: Option<IpcErrorDto>,
 }
 
+#[derive(Clone, Debug)]
+struct AnalysisOperation {
+    id: u64,
+    cancellation: CancellationToken,
+}
+
 /// Cloneable single owner for desktop persistence, tools, queue, events, and shutdown.
 pub(crate) struct ApplicationService {
     config: ServiceConfig,
     initialized: OnceCell<InitializedService>,
     sink: Arc<dyn JobEventSink>,
     closing: AtomicBool,
+    next_analysis_id: AtomicU64,
+    active_analysis: Mutex<Option<AnalysisOperation>>,
 }
 
 impl std::fmt::Debug for ApplicationService {
@@ -126,6 +147,13 @@ impl std::fmt::Debug for ApplicationService {
             .field("config", &self.config)
             .field("initialized", &self.initialized.initialized())
             .field("closing", &self.closing.load(Ordering::Acquire))
+            .field(
+                "has_active_analysis",
+                &self
+                    .active_analysis
+                    .try_lock()
+                    .is_ok_and(|active| active.is_some()),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -139,6 +167,8 @@ impl ApplicationService {
             initialized: OnceCell::new(),
             sink,
             closing: AtomicBool::new(false),
+            next_analysis_id: AtomicU64::new(0),
+            active_analysis: Mutex::new(None),
         }
     }
 
@@ -255,7 +285,7 @@ impl ApplicationService {
                 },
                 last_event_sequence: snapshot.last_event_sequence.to_string(),
                 jobs: snapshot.jobs.iter().map(JobDto::from).collect(),
-                settings: Some(SettingsDto::from(&settings)),
+                settings: Some(self.settings_dto(&settings)),
                 tools: initialized.tools.clone(),
                 diagnostic: initialized.diagnostic.clone(),
             },
@@ -291,25 +321,32 @@ impl ApplicationService {
                 "Enter a valid public YouTube video URL.",
             )
         })?;
-        let initialized = self.initialized().await;
-        let analyzer = initialized
-            .analyzer
-            .as_ref()
-            .ok_or_else(tools_unavailable_error)?;
-        analyzer
-            .analyze(&url, CancellationToken::new())
-            .await
-            .map(|media| AnalyzeResponseDto {
-                schema_version: IPC_SCHEMA_VERSION,
-                media: (&media).into(),
-            })
-            .map_err(|error| {
-                eprintln!("desktop analysis failed: {error:#}");
-                IpcErrorDto::new(
-                    IpcErrorCodeDto::AnalysisFailed,
-                    "The video could not be analyzed. Check that it is public and try again.",
-                )
-            })
+        let operation = self.start_analysis().await;
+        let result = async {
+            let initialized = self.initialized().await;
+            let analyzer = initialized
+                .analyzer
+                .as_ref()
+                .ok_or_else(tools_unavailable_error)?;
+            analyzer
+                .analyze(&url, operation.cancellation.clone())
+                .await
+                .map(|media| AnalyzeResponseDto {
+                    schema_version: IPC_SCHEMA_VERSION,
+                    media: (&media).into(),
+                })
+                .map_err(|error| map_analysis_error(&error))
+        }
+        .await;
+        self.finish_analysis(operation.id).await;
+        result
+    }
+
+    /// Cancels the active URL analysis, when one exists.
+    pub(crate) async fn cancel_analysis(&self) {
+        if let Some(operation) = self.active_analysis.lock().await.take() {
+            operation.cancellation.cancel();
+        }
     }
 
     /// Persists and explicitly starts one normalized engine job.
@@ -417,7 +454,7 @@ impl ApplicationService {
             .await?
             .settings()
             .await
-            .map(|settings| SettingsDto::from(&settings))
+            .map(|settings| self.settings_dto(&settings))
             .map_err(queue_error)
     }
 
@@ -432,7 +469,7 @@ impl ApplicationService {
             .await?
             .update_settings(patch)
             .await
-            .map(|settings| SettingsDto::from(&settings))
+            .map(|settings| self.settings_dto(&settings))
             .map_err(queue_error)
     }
 
@@ -466,6 +503,7 @@ impl ApplicationService {
     /// Stops new work and performs bounded engine shutdown.
     pub(crate) async fn shutdown(&self) -> Result<(), IpcErrorDto> {
         self.closing.store(true, Ordering::Release);
+        self.cancel_analysis().await;
         let Some(initialized) = self.initialized.get() else {
             return Ok(());
         };
@@ -499,6 +537,51 @@ impl ApplicationService {
             Ok(())
         }
     }
+
+    fn settings_dto(&self, settings: &EngineSettings) -> SettingsDto {
+        let mut dto = SettingsDto::from(settings);
+        if dto.default_destination.is_none() {
+            dto.default_destination = self
+                .config
+                .system_downloads_directory
+                .as_deref()
+                .map(crate::ipc::display_path);
+        }
+        dto
+    }
+
+    async fn start_analysis(&self) -> AnalysisOperation {
+        let operation = AnalysisOperation {
+            id: self.next_analysis_id.fetch_add(1, Ordering::Relaxed),
+            cancellation: CancellationToken::new(),
+        };
+        let mut active = self.active_analysis.lock().await;
+        if let Some(previous) = active.replace(operation.clone()) {
+            previous.cancellation.cancel();
+        }
+        operation
+    }
+
+    async fn finish_analysis(&self, id: u64) {
+        let mut active = self.active_analysis.lock().await;
+        if active.as_ref().is_some_and(|operation| operation.id == id) {
+            active.take();
+        }
+    }
+}
+
+fn map_analysis_error(error: &AnalyzeError) -> IpcErrorDto {
+    if matches!(error, AnalyzeError::Cancelled) {
+        return IpcErrorDto::new(
+            IpcErrorCodeDto::AnalysisCancelled,
+            "Video analysis was cancelled.",
+        );
+    }
+    eprintln!("desktop analysis failed: {error:#}");
+    IpcErrorDto::new(
+        IpcErrorCodeDto::AnalysisFailed,
+        "The video could not be analyzed. Check that it is public and try again.",
+    )
 }
 
 async fn resolve_tools(config: &ServiceConfig) -> Result<Vec<ResolvedTool>, ()> {
@@ -762,6 +845,8 @@ mod tests {
 
     #[derive(Default)]
     struct FixtureRunner {
+        block_analysis: AtomicBool,
+        analysis_started: AtomicBool,
         block_download: AtomicBool,
         fail_analysis: AtomicBool,
     }
@@ -803,6 +888,13 @@ mod tests {
                 .iter()
                 .any(|argument| argument == "--dump-single-json")
             {
+                self.analysis_started.store(true, Ordering::Release);
+                if self.block_analysis.load(Ordering::Acquire) {
+                    cancellation.cancelled().await;
+                    return Err(ProcessError::Cancelled {
+                        output: CapturedOutput::default(),
+                    });
+                }
                 if self.fail_analysis.load(Ordering::Acquire) {
                     return Err(ProcessError::Write(std::io::Error::other(
                         "secret C:\\private\\tool-output",
@@ -924,7 +1016,9 @@ mod tests {
     ) -> Result<ServiceConfig, Box<dyn std::error::Error>> {
         let target = SupportedTarget::current()?;
         let tools = root.join("tools");
+        let downloads = root.join("Downloads");
         fs::create_dir_all(&tools)?;
+        fs::create_dir_all(&downloads)?;
         let mut explicit_overrides = std::collections::BTreeMap::new();
         for tool in Tool::ALL {
             let path = tools.join(tool.executable_name(target));
@@ -941,6 +1035,7 @@ mod tests {
         }
         Ok(ServiceConfig {
             data_directory: root.join("data"),
+            system_downloads_directory: Some(downloads),
             managed_tools_directory: None,
             bundled_tools_directory: None,
             resolution_mode: ResolutionMode::Production,
@@ -1131,6 +1226,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn system_downloads_is_the_effective_default_and_clear_restores_it()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempdir()?;
+        let custom = root.path().join("custom");
+        fs::create_dir_all(&custom)?;
+        let config = fixture_config(root.path(), Arc::new(FixtureRunner::default()))?;
+        let system_downloads = config
+            .system_downloads_directory
+            .clone()
+            .ok_or("fixture system Downloads directory missing")?;
+        let service = ApplicationService::new(config, Arc::new(RecordingSink::default()));
+
+        assert_eq!(
+            service
+                .read_settings()
+                .await?
+                .default_destination
+                .as_deref(),
+            Some(system_downloads.to_string_lossy().as_ref())
+        );
+        let custom_settings = service
+            .update_settings(UpdateSettingsRequestDto {
+                default_destination: DefaultDestinationUpdateDto::Set(
+                    custom.to_string_lossy().into_owned(),
+                ),
+                queue_concurrency: None,
+                update_preference: None,
+                last_output: None,
+            })
+            .await?;
+        assert_eq!(
+            custom_settings.default_destination.as_deref(),
+            Some(custom.to_string_lossy().as_ref())
+        );
+        let restored = service
+            .update_settings(UpdateSettingsRequestDto {
+                default_destination: DefaultDestinationUpdateDto::Clear,
+                queue_concurrency: None,
+                update_preference: None,
+                last_output: None,
+            })
+            .await?;
+        assert_eq!(
+            restored.default_destination.as_deref(),
+            Some(system_downloads.to_string_lossy().as_ref())
+        );
+        service.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn analysis_errors_are_redacted_from_ipc() -> Result<(), Box<dyn std::error::Error>> {
         let root = tempdir()?;
         let runner = Arc::new(FixtureRunner::default());
@@ -1154,11 +1300,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn active_analysis_is_cancelled_and_a_later_analysis_can_succeed()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempdir()?;
+        let runner = Arc::new(FixtureRunner::default());
+        runner.block_analysis.store(true, Ordering::Release);
+        let config = fixture_config(root.path(), runner.clone())?;
+        let service = Arc::new(ApplicationService::new(
+            config,
+            Arc::new(RecordingSink::default()),
+        ));
+        let analysis_service = Arc::clone(&service);
+        let pending = tokio::spawn(async move {
+            analysis_service
+                .analyze(AnalyzeRequestDto {
+                    url: "https://youtu.be/dQw4w9WgXcQ".to_owned(),
+                })
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !runner.analysis_started.load(Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+
+        service.cancel_analysis().await;
+        let cancelled = pending.await?;
+        assert!(matches!(
+            cancelled,
+            Err(ref error) if error.code == IpcErrorCodeDto::AnalysisCancelled
+        ));
+
+        runner.block_analysis.store(false, Ordering::Release);
+        let analyzed = service
+            .analyze(AnalyzeRequestDto {
+                url: "https://youtu.be/dQw4w9WgXcQ".to_owned(),
+            })
+            .await?;
+        assert_eq!(analyzed.media.id, "dQw4w9WgXcQ");
+        service.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn bootstrap_distinguishes_recoverable_tools_from_persistence_failure()
     -> Result<(), Box<dyn std::error::Error>> {
         let root = tempdir()?;
         let degraded = ServiceConfig {
             data_directory: root.path().join("degraded-data"),
+            system_downloads_directory: Some(root.path().join("Downloads")),
             managed_tools_directory: None,
             bundled_tools_directory: None,
             resolution_mode: ResolutionMode::Production,
@@ -1177,6 +1368,7 @@ mod tests {
         fs::write(&invalid_data, b"fixture")?;
         let failed = ServiceConfig {
             data_directory: invalid_data,
+            system_downloads_directory: Some(root.path().join("Downloads")),
             managed_tools_directory: None,
             bundled_tools_directory: None,
             resolution_mode: ResolutionMode::Production,

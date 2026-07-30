@@ -9,4 +9,5 @@ if (target === null) {
   throw new Error('application mount point was not found');
 }
 
+target.replaceChildren();
 mount(App, { target });

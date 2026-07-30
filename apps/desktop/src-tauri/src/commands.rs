@@ -1,9 +1,8 @@
 //! Thin Tauri transport adapters over [`crate::service::ApplicationService`].
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
-use tokio::sync::oneshot;
 
 use crate::{
     ipc::{
@@ -29,6 +28,15 @@ pub async fn analyze(
     request: AnalyzeRequestDto,
 ) -> Result<AnalyzeResponseDto, IpcErrorDto> {
     service.analyze(request).await
+}
+
+/// Cancels the currently active URL analysis, when one exists.
+#[tauri::command]
+pub async fn cancel_analysis(
+    service: State<'_, ApplicationService>,
+) -> Result<ActionResultDto, IpcErrorDto> {
+    service.cancel_analysis().await;
+    Ok(action_result())
 }
 
 /// Enqueues one validated download request.
@@ -128,20 +136,22 @@ pub async fn update_settings(
 
 /// Opens the operating system's native folder picker.
 #[tauri::command]
-pub async fn choose_destination(app: AppHandle) -> Result<DestinationSelectionDto, IpcErrorDto> {
-    let (sender, receiver) = oneshot::channel();
-    app.dialog()
+pub async fn choose_destination(
+    window: WebviewWindow,
+) -> Result<DestinationSelectionDto, IpcErrorDto> {
+    let picker = window
+        .dialog()
         .file()
-        .set_title("Choose download destination")
-        .pick_folder(move |selection| {
-            let _ignored = sender.send(selection);
-        });
-    let selection = receiver.await.map_err(|_| {
-        IpcErrorDto::new(
-            IpcErrorCodeDto::DestinationSelectionFailed,
-            "The native folder picker closed unexpectedly.",
-        )
-    })?;
+        .set_parent(&window)
+        .set_title("Choose download destination");
+    let selection = tauri::async_runtime::spawn_blocking(move || picker.blocking_pick_folder())
+        .await
+        .map_err(|_| {
+            IpcErrorDto::new(
+                IpcErrorCodeDto::DestinationSelectionFailed,
+                "The native folder picker could not complete.",
+            )
+        })?;
     let path = selection
         .map(|selection| {
             selection.into_path().map_err(|_| {

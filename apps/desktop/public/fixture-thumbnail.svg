@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360" role="img" aria-label="Deterministic city lights test fixture">
+  <rect width="640" height="360" fill="#15191b"/>
+  <rect y="240" width="640" height="120" fill="#0d1113"/>
+  <g fill="#2a3033">
+    <rect x="36" y="160" width="78" height="120"/>
+    <rect x="132" y="110" width="92" height="170"/>
+    <rect x="245" y="145" width="70" height="135"/>
+    <rect x="338" y="72" width="112" height="208"/>
+    <rect x="474" y="128" width="66" height="152"/>
+    <rect x="554" y="96" width="48" height="184"/>
+  </g>
+  <g fill="#f3a51f">
+    <circle cx="56" cy="192" r="4"/><circle cx="82" cy="218" r="4"/>
+    <circle cx="156" cy="142" r="4"/><circle cx="192" cy="184" r="4"/>
+    <circle cx="270" cy="180" r="4"/><circle cx="292" cy="212" r="4"/>
+    <circle cx="370" cy="110" r="4"/><circle cx="416" cy="155" r="4"/>
+    <circle cx="501" cy="166" r="4"/><circle cx="578" cy="132" r="4"/>
+  </g>
+  <path d="M0 286 Q160 260 320 290 T640 278" fill="none" stroke="#52595b" stroke-width="3"/>
+  <path d="M0 306 Q160 280 320 310 T640 298" fill="none" stroke="#8f651f" stroke-width="2" opacity=".75"/>
+</svg>

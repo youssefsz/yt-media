@@ -4,14 +4,14 @@ description = "Native desktop shell for YT Media"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-default-run = "yt-media"
+default-run = "yt-media-app"
 
 [lib]
 name = "yt_media_desktop"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "yt-media"
+name = "yt-media-app"
 path = "src/main.rs"
 doc = false
 

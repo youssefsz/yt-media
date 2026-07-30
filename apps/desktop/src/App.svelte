@@ -1,51 +1,38 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
 
-  import type { BootstrapStateDto, IpcErrorDto } from './lib/ipc/generated';
-  import { connectJobEvents, isIpcError } from './lib/ipc/client';
+  import JobList from './lib/components/JobList.svelte';
+  import NewDownload from './lib/components/NewDownload.svelte';
+  import Settings from './lib/components/Settings.svelte';
+  import Sidebar from './lib/components/Sidebar.svelte';
+  import TransferShelf from './lib/components/TransferShelf.svelte';
+  import { createWorkspaceController, type WorkspaceView } from './lib/controller/workspace';
+  import { desktopClient, type DesktopClient } from './lib/ipc/client';
 
-  let bootstrapState: BootstrapStateDto | undefined;
-  let bootstrapError: IpcErrorDto | undefined;
-  let lastEventSequence = '0';
+  export let client: DesktopClient = desktopClient;
+
+  const controller = createWorkspaceController(client);
+  const workspace = controller.state;
+
+  $: queueJobs = $workspace.jobs.filter((job) => !job.is_terminal);
+  $: historyJobs = $workspace.jobs.filter((job) => job.is_terminal);
+  $: shelfJobs = queueJobs.filter((job) => job.state !== 'interrupted');
+
+  const navigate = async (view: WorkspaceView): Promise<void> => {
+    controller.navigate(view);
+    await tick();
+    const urlInput = view === 'new-download' ? document.getElementById('video-url') : null;
+    const target =
+      urlInput instanceof HTMLInputElement && !urlInput.disabled
+        ? urlInput
+        : document.getElementById('view-title');
+    target?.focus();
+  };
 
   onMount(() => {
-    let disposed = false;
-    let disconnect: (() => void) | undefined;
-    void connectJobEvents(
-      (snapshot) => {
-        if (!disposed) {
-          bootstrapState = snapshot;
-          lastEventSequence = snapshot.last_event_sequence;
-        }
-      },
-      (event) => {
-        if (!disposed) {
-          lastEventSequence = event.sequence;
-        }
-      },
-    )
-      .then((unlisten) => {
-        if (disposed) {
-          unlisten();
-        } else {
-          disconnect = unlisten;
-        }
-      })
-      .catch((error: unknown) => {
-        if (disposed) {
-          return;
-        }
-        bootstrapError = isIpcError(error)
-          ? error
-          : {
-              code: 'internal',
-              message: 'The native application service did not respond. Restart YT Media.',
-              details: [],
-            };
-      });
+    void controller.connect();
     return () => {
-      disposed = true;
-      disconnect?.();
+      controller.disconnect();
     };
   });
 </script>
@@ -53,56 +40,116 @@
 <svelte:head>
   <meta
     name="description"
-    content="YT Media local desktop service bootstrap and recovery diagnostics."
+    content="YT Media local-first download queue and media conversion workspace."
   />
 </svelte:head>
 
-<main aria-labelledby="bootstrap-title">
-  <section class="bootstrap-panel" aria-live="polite">
-    <p class="eyebrow">Local media workspace</p>
-    <h1 id="bootstrap-title">YT Media</h1>
-    {#if bootstrapError !== undefined}
-      <div class="diagnostic" role="alert">
-        <h2>Native service unavailable</h2>
-        <p>{bootstrapError.message}</p>
-      </div>
-    {:else if bootstrapState === undefined}
-      <p class="status">Recovering local jobs and checking media tools…</p>
-    {:else}
-      <p class:healthy={bootstrapState.health === 'healthy'} class="status">
-        {bootstrapState.health === 'healthy'
-          ? 'Desktop integration ready'
-          : bootstrapState.health === 'degraded'
-            ? 'Local history ready; media tools need attention'
-            : 'Local service needs attention'}
-      </p>
-      <dl>
-        <div>
-          <dt>Recovered jobs</dt>
-          <dd>{bootstrapState.jobs.length}</dd>
+{#if $workspace.connection === 'loading'}
+  <div class="startup-screen" role="status" aria-live="polite">
+    <span class="startup-mark" aria-hidden="true">
+      <img class="startup-logo" src="/brand-mark.svg" alt="" />
+    </span>
+    <span>Starting YT Media</span>
+  </div>
+{:else}
+  <div class="app-shell">
+    <Sidebar
+      activeView={$workspace.view}
+      queueCount={queueJobs.length}
+      onNavigate={(view) => void navigate(view)}
+    />
+    <div class="app-body" class:has-expanded-shelf={$workspace.shelfExpanded}>
+      {#if $workspace.diagnostic !== null}
+        <div class="service-banner" role="status">
+          <strong>Local service needs attention</strong>
+          <span>{$workspace.diagnostic.message}</span>
+          <button type="button" onclick={() => void controller.reconnect()}>Retry startup</button>
         </div>
-        <div>
-          <dt>Verified tools</dt>
-          <dd>{bootstrapState.tools.filter((tool) => tool.ready).length} / 4</dd>
-        </div>
-        <div>
-          <dt>Event boundary</dt>
-          <dd>{lastEventSequence}</dd>
-        </div>
-        <div>
-          <dt>IPC schema</dt>
-          <dd>v{bootstrapState.schema_version}</dd>
-        </div>
-      </dl>
-      {#if bootstrapState.diagnostic !== null}
-        <div class="diagnostic" role="status">
-          <h2>Recoverable diagnostic</h2>
-          <p>{bootstrapState.diagnostic.message}</p>
+      {:else if $workspace.connectionError !== null}
+        <div class="service-banner" role="alert">
+          <strong>
+            {$workspace.connection === 'error'
+              ? 'Native service unavailable'
+              : 'Action needs attention'}
+          </strong>
+          <span>{$workspace.connectionError.message}</span>
+          {#if $workspace.connection === 'error'}
+            <button type="button" onclick={() => void controller.reconnect()}>Reconnect</button>
+          {/if}
         </div>
       {/if}
-    {/if}
-    <p class="scope-note">
-      Download controls and the full desktop workspace arrive in the next UI milestone.
+
+      <main>
+        {#if $workspace.view === 'new-download'}
+          <NewDownload
+            analysis={$workspace.analysis}
+            draft={$workspace.draft}
+            busyActions={$workspace.busyActions}
+            onSetUrl={controller.setUrl}
+            onSetName={controller.setName}
+            onSetOutputKind={controller.setOutputKind}
+            onSelectOutput={controller.selectOutput}
+            onAnalyze={controller.analyze}
+            onCancelAnalysis={controller.cancelAnalysis}
+            onChooseDestination={controller.chooseDestination}
+            onEnqueue={controller.enqueue}
+          />
+        {:else if $workspace.view === 'queue'}
+          <JobList
+            mode="queue"
+            connection={$workspace.connection}
+            connectionError={$workspace.connectionError}
+            jobs={queueJobs}
+            busyActions={$workspace.busyActions}
+            onPause={controller.pause}
+            onResume={controller.resume}
+            onCancel={controller.cancel}
+            onRetry={controller.retry}
+            onReveal={controller.reveal}
+            onDelete={controller.deleteHistory}
+          />
+        {:else if $workspace.view === 'history'}
+          <JobList
+            mode="history"
+            connection={$workspace.connection}
+            connectionError={$workspace.connectionError}
+            jobs={historyJobs}
+            busyActions={$workspace.busyActions}
+            onPause={controller.pause}
+            onResume={controller.resume}
+            onCancel={controller.cancel}
+            onRetry={controller.retry}
+            onReveal={controller.reveal}
+            onDelete={controller.deleteHistory}
+          />
+        {:else}
+          <Settings
+            settings={$workspace.settings}
+            tools={$workspace.tools}
+            status={$workspace.settingsStatus}
+            error={$workspace.settingsError}
+            busyActions={$workspace.busyActions}
+            onSetConcurrency={controller.setConcurrency}
+            onSetUpdatePreference={controller.setUpdatePreference}
+            onChooseDefaultDestination={controller.chooseDefaultDestination}
+            onClearDefaultDestination={controller.clearDefaultDestination}
+            onRefreshTools={controller.refreshTools}
+          />
+        {/if}
+      </main>
+
+      <TransferShelf
+        jobs={shelfJobs}
+        expanded={$workspace.shelfExpanded}
+        busyActions={$workspace.busyActions}
+        onToggle={controller.toggleShelf}
+        onPause={controller.pause}
+        onResume={controller.resume}
+        onCancel={controller.cancel}
+      />
+    </div>
+    <p class="sr-only" aria-live="polite" aria-atomic="true">
+      {$workspace.announcement}
     </p>
-  </section>
-</main>
+  </div>
+{/if}

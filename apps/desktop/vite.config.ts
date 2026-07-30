@@ -1,7 +1,7 @@
 import process from 'node:process';
 
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -13,6 +13,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    exclude: [...configDefaults.exclude, 'tests/visual/**'],
   },
   server: {
     host: host ?? false,

@@ -994,12 +994,10 @@ fn validate_size(value: Option<u64>, field: &'static str) -> Result<(), Analysis
 }
 
 fn validate_bitrate(value: Option<f64>, field: &'static str) -> Result<(), AnalysisDataError> {
-    if value
-        .is_some_and(|bitrate| !bitrate.is_finite() || bitrate <= 0.0 || bitrate > MAX_BITRATE_KBPS)
-    {
+    if value.is_some_and(|bitrate| !(0.0..=MAX_BITRATE_KBPS).contains(&bitrate)) {
         return Err(AnalysisDataError::InvalidField {
             field,
-            reason: "bitrate must be positive, finite, and bounded",
+            reason: "bitrate must be non-negative, finite, and bounded",
         });
     }
     Ok(())
@@ -1194,6 +1192,8 @@ mod tests {
     const LIVE: &[u8] = include_bytes!("../../tests/fixtures/analysis/live.json");
     const MALFORMED: &[u8] = include_bytes!("../../tests/fixtures/analysis/malformed.txt");
     const INCOMPATIBLE: &[u8] = include_bytes!("../../tests/fixtures/analysis/incompatible.json");
+    const ZERO_INACTIVE_BITRATES: &[u8] =
+        include_bytes!("../../tests/fixtures/analysis/zero-inactive-bitrates.json");
 
     fn fixture_url() -> Result<MediaUrl, crate::analysis::MediaUrlError> {
         MediaUrl::parse("https://youtu.be/dQw4w9WgXcQ")
@@ -1304,6 +1304,40 @@ mod tests {
                 ..
             }
         )));
+        Ok(())
+    }
+
+    #[test]
+    fn zero_inactive_bitrates_are_treated_as_unavailable() -> Result<(), AnalyzeError> {
+        let info = parse_fixture(ZERO_INACTIVE_BITRATES)?;
+        assert!(info.formats.iter().any(|option| matches!(
+            option,
+            FormatOption::Mp4 {
+                video_source,
+                audio_source,
+                ..
+            } if video_source.format_id.as_str() == "137"
+                && audio_source.format_id.as_str() == "140"
+        )));
+        assert!(info.formats.iter().any(|option| matches!(
+            option,
+            FormatOption::Mp3 { source, .. } if source.format_id.as_str() == "140"
+        )));
+        Ok(())
+    }
+
+    #[test]
+    fn negative_bitrates_remain_invalid() -> Result<(), Box<dyn std::error::Error>> {
+        let mut value: serde_json::Value = serde_json::from_slice(ZERO_INACTIVE_BITRATES)?;
+        value["formats"][0]["vbr"] = serde_json::Value::from(-1);
+        let raw: RawMedia = serde_json::from_value(value)?;
+        assert!(matches!(
+            normalize_media(raw, &fixture_url()?, Vec::new()),
+            Err(AnalyzeError::InvalidData(AnalysisDataError::InvalidField {
+                field: "formats.vbr",
+                ..
+            }))
+        ));
         Ok(())
     }
 

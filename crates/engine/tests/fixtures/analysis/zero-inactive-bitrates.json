@@ -1,0 +1,33 @@
+{
+  "id": "dQw4w9WgXcQ",
+  "title": "Zero inactive bitrate fixture",
+  "duration": 212.4,
+  "availability": "public",
+  "live_status": "not_live",
+  "_type": "video",
+  "formats": [
+    {
+      "format_id": "137",
+      "ext": "mp4",
+      "vcodec": "avc1.640028",
+      "acodec": "none",
+      "width": 1920,
+      "height": 1080,
+      "fps": 30,
+      "filesize": 12000000,
+      "tbr": 1800,
+      "vbr": 1800,
+      "abr": 0
+    },
+    {
+      "format_id": "140",
+      "ext": "m4a",
+      "vcodec": "none",
+      "acodec": "mp4a.40.2",
+      "filesize": 1500000,
+      "tbr": 128,
+      "vbr": 0,
+      "abr": 128
+    }
+  ]
+}

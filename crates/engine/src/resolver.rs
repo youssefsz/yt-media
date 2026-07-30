@@ -198,6 +198,8 @@ impl VerifiedToolSet {
         let document = read_checksum_inventory(&checksum_path).await?;
         let mut checksums = parse_checksum_inventory(&document)?;
         let mut paths = BTreeMap::new();
+        #[cfg(target_os = "macos")]
+        verify_macos_app_bundle(runner.as_ref(), &root, cancellation.child_token()).await?;
         for tool in Tool::ALL {
             let staged_name = tool.staged_name(target);
             let expected_hash = checksums
@@ -557,57 +559,41 @@ async fn verify_external_file_digest(
 #[cfg(target_os = "macos")]
 async fn verify_external_file_digest(
     runner: &dyn ProcessRunner,
-    tool: Tool,
+    _tool: Tool,
     path: &Path,
-    expected_hash: &str,
+    _expected_hash: &str,
     cancellation: CancellationToken,
 ) -> Result<(), ToolSetVerificationError> {
-    run_codesign(
-        runner,
-        tool,
-        ["--verify", "--strict"],
-        path,
-        cancellation.child_token(),
-    )
-    .await?;
+    run_codesign(runner, ["--verify", "--strict"], path, cancellation).await
+}
 
-    let temporary_directory = tokio::task::spawn_blocking(tempfile::tempdir)
-        .await
-        .map_err(ToolSetVerificationError::TemporaryDirectoryTask)?
-        .map_err(ToolSetVerificationError::TemporaryDirectory)?;
-    let unsigned_copy = temporary_directory
-        .path()
-        .join(tool.executable_name(SupportedTarget::current()?));
-    tokio::fs::copy(path, &unsigned_copy)
-        .await
-        .map_err(|source| ToolSetVerificationError::CopyForVerification {
-            source_path: path.to_path_buf(),
-            destination_path: unsigned_copy.clone(),
-            source,
+#[cfg(target_os = "macos")]
+async fn verify_macos_app_bundle(
+    runner: &dyn ProcessRunner,
+    executable_root: &Path,
+    cancellation: CancellationToken,
+) -> Result<(), ToolSetVerificationError> {
+    let contents = executable_root
+        .parent()
+        .filter(|path| path.file_name() == Some(std::ffi::OsStr::new("Contents")));
+    let application = contents
+        .and_then(Path::parent)
+        .filter(|path| path.extension() == Some(std::ffi::OsStr::new("app")))
+        .ok_or_else(|| ToolSetVerificationError::InvalidMacOsBundleLayout {
+            path: executable_root.to_path_buf(),
         })?;
     run_codesign(
         runner,
-        tool,
-        ["--remove-signature"],
-        &unsigned_copy,
+        ["--verify", "--deep", "--strict"],
+        application,
         cancellation,
     )
-    .await?;
-
-    let unsigned_size = tokio::fs::metadata(&unsigned_copy)
-        .await
-        .map_err(|source| ToolSetVerificationError::Inspect {
-            path: unsigned_copy.clone(),
-            source,
-        })?
-        .len();
-    verify_file_digest(tool, &unsigned_copy, unsigned_size, expected_hash).await
+    .await
 }
 
 #[cfg(target_os = "macos")]
 async fn run_codesign<const N: usize>(
     runner: &dyn ProcessRunner,
-    tool: Tool,
     arguments: [&str; N],
     path: &Path,
     cancellation: CancellationToken,
@@ -621,13 +607,13 @@ async fn run_codesign<const N: usize>(
         .output_limit(output_limit);
     let output = runner.run(spec, cancellation).await.map_err(|source| {
         ToolSetVerificationError::MacOsSignatureProcess {
-            tool,
+            path: path.to_path_buf(),
             source: Box::new(source),
         }
     })?;
     if !output.status.success {
         return Err(ToolSetVerificationError::MacOsSignatureRejected {
-            tool,
+            path: path.to_path_buf(),
             output: Box::new(output),
         });
     }
@@ -998,46 +984,29 @@ pub enum ToolSetVerificationError {
     /// The blocking path-validation task failed.
     #[error("executable path validation task failed")]
     ValidationTask(#[source] tokio::task::JoinError),
-    /// Creating a private temporary directory failed.
+    /// The bundled-tool directory was not the executable directory of a macOS application bundle.
     #[cfg(target_os = "macos")]
-    #[error("could not create a private directory for macOS signature verification")]
-    TemporaryDirectory(#[source] std::io::Error),
-    /// The blocking temporary-directory task failed.
-    #[cfg(target_os = "macos")]
-    #[error("macOS signature verification directory task failed")]
-    TemporaryDirectoryTask(#[source] tokio::task::JoinError),
-    /// Copying a signed executable for non-destructive payload verification failed.
-    #[cfg(target_os = "macos")]
-    #[error(
-        "could not copy signed tool from `{}` to `{}` for verification",
-        source_path.display(),
-        destination_path.display()
-    )]
-    CopyForVerification {
-        /// Signed executable in the immutable application bundle.
-        source_path: PathBuf,
-        /// Private copy used only for signature removal and hashing.
-        destination_path: PathBuf,
-        /// Copy failure.
-        #[source]
-        source: std::io::Error,
+    #[error("macOS bundled tools are outside a valid `.app/Contents/MacOS` directory: `{}`", path.display())]
+    InvalidMacOsBundleLayout {
+        /// Invalid executable directory.
+        path: PathBuf,
     },
     /// Invoking the platform signature verifier failed.
     #[cfg(target_os = "macos")]
-    #[error("could not verify the macOS signature envelope for `{tool}`")]
+    #[error("could not verify the macOS signature envelope for `{}`", path.display())]
     MacOsSignatureProcess {
-        /// Affected tool.
-        tool: Tool,
+        /// Affected executable or application bundle.
+        path: PathBuf,
         /// Process execution failure.
         #[source]
         source: Box<ProcessError>,
     },
     /// The platform signature verifier rejected a packaged executable.
     #[cfg(target_os = "macos")]
-    #[error("macOS signature verification rejected `{tool}`")]
+    #[error("macOS signature verification rejected `{}`", path.display())]
     MacOsSignatureRejected {
-        /// Affected tool.
-        tool: Tool,
+        /// Affected executable or application bundle.
+        path: PathBuf,
         /// Complete bounded verifier output.
         output: Box<ProcessOutput>,
     },

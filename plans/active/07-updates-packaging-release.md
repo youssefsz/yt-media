@@ -82,13 +82,12 @@ release matrix without publishing until explicitly authorized.
 
 ## Decisions and Deviations
 
-- macOS code signing adds a signature envelope after the immutable baseline inventory is generated.
-  The desktop-specific inventory therefore records a canonical payload hash produced by ad-hoc
-  signing and then stripping a private staging copy; exact whole-file checksums remain authoritative
-  for CLI and tool archives. Package inspection and runtime baseline verification first require
-  strict `codesign` verification, remove the package signature only from a private copy, and
-  compare that canonical payload with the desktop inventory. The signed application bundle is
-  never modified, and version/codec/EJS probes run against the original signed executable.
+- macOS code signing replaces nested executable signatures after the immutable baseline inventory
+  is generated. Exact whole-file checksums therefore remain authoritative through pre-sign desktop
+  staging and for CLI/tool archives. Following Apple's nested-code model, package inspection and
+  runtime validate each sidecar signature and the containing application's deep, strict seal, whose
+  nested-code records bind those signed executables. The application bundle is never modified, and
+  version/codec/EJS probes run against the original signed executable.
 
 ## Completion Evidence
 

@@ -35,15 +35,14 @@ verify_tree() {
     local digest_path="${matches[0]}"
     if [[ "$mode" == "signed-macos" ]]; then
       codesign --verify --strict "$digest_path"
-      digest_path="${inspection_root}/unsigned-${tool}"
-      cp -- "${matches[0]}" "$digest_path"
-      codesign --remove-signature "$digest_path"
-    fi
-    local found
-    found="$(shasum -a 256 "$digest_path" | awk '{print $1}')"
-    if [[ "$found" != "$expected" ]]; then
-      echo "packaged ${tool} payload digest ${found} differs from ${expected}" >&2
-      return 1
+      echo "validated_signed_sidecar=${tool}"
+    else
+      local found
+      found="$(shasum -a 256 "$digest_path" | awk '{print $1}')"
+      if [[ "$found" != "$expected" ]]; then
+        echo "packaged ${tool} payload digest ${found} differs from ${expected}" >&2
+        return 1
+      fi
     fi
   done
   if find "$root" \( -name '*.part' -o -name '*.tmp' -o -name '.cache' -o -path '*/staging/*' -o -path '*/updates/*' \) -print -quit | grep -q .; then

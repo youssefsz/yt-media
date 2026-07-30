@@ -83,11 +83,11 @@ At runtime the engine:
 Two consecutive managed-start failures trigger rollback. The Settings action “Use bundled tools”
 removes managed update state only. Bundled tools and durable jobs/history/settings remain.
 
-CLI and managed-tool archives use exact whole-file checksums. Because macOS packaging replaces
-nested executable signatures, the desktop resource inventory instead pins a canonical payload hash
-created by signing and stripping a private staging copy. Package inspection and runtime require a
-valid package signature before stripping a separate private copy and comparing that payload hash;
-the application bundle is never modified.
+CLI, managed-tool archives, and pre-sign desktop staging use exact whole-file checksums. macOS
+packaging replaces nested executable signatures, so package inspection and runtime validate each
+signed sidecar plus the containing application's deep, strict code-signing seal. The outer
+application seal records the nested code identities; version, codec, and EJS probes then run against
+the original signed executables. No verification step modifies the application bundle.
 
 ## Local Validation
 

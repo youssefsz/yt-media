@@ -93,6 +93,16 @@ release matrix without publishing until explicitly authorized.
   sidecar filenames. linuxdeploy otherwise rewrites every ELF in AppImage `usr/bin`, including
   standalone yt-dlp and Deno payloads. Debian and AppImage packages must preserve and prove the
   exact staged sidecar digests.
+- Controlled-fixture analysis retains a 30-second default ceiling, with reviewed target-specific
+  limits of 35 seconds for Windows x64 and 45 seconds for macOS Intel. Consecutive Windows x64
+  prepare runs measured 25.055 and 32.466 seconds on GitHub-hosted runners; the scoped ceiling
+  allows about 8 percent above the observed high without relaxing Windows ARM64, Linux, or Apple
+  Silicon targets.
+- The user explicitly added the missing analyzed-video preview to Plan 07 after observing the
+  packaged Windows application. yt-dlp returned an HTTPS `i.ytimg.com` thumbnail, but the desktop
+  content-security policy rejected that host. The packaged CSP now admits only
+  `https://i.ytimg.com` for remote images, retaining the existing local/data/blob sources and
+  avoiding a broad `https:` or `http:` image permission.
 
 ## Completion Evidence
 

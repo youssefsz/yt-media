@@ -55,7 +55,7 @@ describe('desktop workspace', () => {
   });
 
   it('supports empty validation, Enter-key analysis, format selection, and enqueue', async () => {
-    const { client } = renderApp();
+    const { client, container } = renderApp();
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('button', { name: 'Analyze' }));
@@ -74,6 +74,10 @@ describe('desktop workspace', () => {
     ).toHaveFocus();
     expect(screen.getByRole('tab', { name: 'MP4' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('radio', { name: /1080p/ })).toBeChecked();
+    expect(container.querySelector('.thumbnail-frame img')).toHaveAttribute(
+      'src',
+      analysisFixture.media.thumbnails[0]?.url,
+    );
 
     await user.click(screen.getByRole('radio', { name: /720p/ }));
     await user.click(screen.getByRole('tab', { name: 'MP3' }));

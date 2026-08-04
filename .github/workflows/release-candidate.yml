@@ -40,7 +40,7 @@ jobs:
       contents: write
     steps:
       - name: Check out exact source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.2
         with:
           ref: ${{ inputs.source_sha }}
           persist-credentials: false
@@ -124,7 +124,7 @@ jobs:
 
     steps:
       - name: Check out exact source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.2
         with:
           ref: ${{ inputs.source_sha }}
           persist-credentials: false
@@ -193,7 +193,7 @@ jobs:
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.2
 
       - name: Install Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6.3.0
         with:
           node-version: '22.20.0'
           cache: pnpm
@@ -357,7 +357,7 @@ jobs:
 
       - name: Sign Windows NSIS installer with Artifact Signing
         if: runner.os == 'Windows'
-        uses: azure/trusted-signing-action@0d74250c661747df006298d0fb49944c10f16e03 # v0.5.1
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           trusted-signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}

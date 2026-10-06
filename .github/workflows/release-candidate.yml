@@ -40,7 +40,7 @@ jobs:
       contents: write
     steps:
       - name: Check out exact source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.2
         with:
           ref: ${{ inputs.source_sha }}
           persist-credentials: false
@@ -124,7 +124,7 @@ jobs:
 
     steps:
       - name: Check out exact source
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.2
         with:
           ref: ${{ inputs.source_sha }}
           persist-credentials: false
@@ -190,10 +190,10 @@ jobs:
           rustup default 1.96.0
 
       - name: Install pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.2
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.0.2
 
       - name: Install Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6.3.0
         with:
           node-version: '22.20.0'
           cache: pnpm
@@ -217,7 +217,7 @@ jobs:
 
       - name: Install Windows build environment
         if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.30.0
+        uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.30.0
         with:
           msystem: ${{ matrix.msystem }}
           update: true
@@ -349,7 +349,7 @@ jobs:
 
       - name: Authenticate to Azure with GitHub OIDC
         if: runner.os == 'Windows'
-        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -357,7 +357,7 @@ jobs:
 
       - name: Sign Windows NSIS installer with Artifact Signing
         if: runner.os == 'Windows'
-        uses: azure/trusted-signing-action@0d74250c661747df006298d0fb49944c10f16e03 # v0.5.1
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
         with:
           endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
           trusted-signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
@@ -441,7 +441,7 @@ jobs:
             --version "$RELEASE_VERSION"
 
       - name: Attest release candidate and SBOM
-        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.0.0
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.0.0
         with:
           subject-path: target/release-candidate/${{ matrix.target }}/**/*
           sbom-path: target/release-candidate/${{ matrix.target }}/metadata/sbom.spdx.json

@@ -25,7 +25,7 @@ thiserror.workspace = true
 tokio.workspace = true
 yt-media-engine = { path = "../../crates/engine" }
 xz2 = "0.1.7"
-zip = { version = "8.1.0", default-features = false, features = [
+zip = { version = "9.0.1", default-features = false, features = [
   "deflate-flate2-zlib-rs",
 ] }
 
